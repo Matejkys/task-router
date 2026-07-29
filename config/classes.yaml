@@ -1,0 +1,114 @@
+# Task taxonomy. Internal vocabulary belongs in classes.local.yaml (gitignored).
+version: 1
+
+classes:
+  recon:
+    patterns:
+      - '(?i)\b(find|locate|list all|search for)\b'
+      - '(?i)\b(explore|inspect|describe)\b.*\b(backup|dump|export|archive)\b'
+    delegation: >-
+      all work in subagents: extraction on the cheap model, synthesis on the mid
+      model; main loop dispatches and summarises only
+    sub_model: claude-haiku-4-5-20251001
+    sub_effort: low
+    budget_soft: 150000
+    escalation: >-
+      if extraction is inconclusive, move synthesis to the mid model before
+      widening the search
+
+  pr_review:
+    patterns:
+      - '(?i)\breview\b.*\b(pr|pull[- ]request)\b'
+      - '(?i)\bpull/\d+'
+    delegation: >-
+      mid-model reviewer subagent; main loop writes the final verdict only
+    sub_model: claude-sonnet-5
+    sub_effort: medium
+    budget_soft: 200000
+    escalation: >-
+      escalate to the strong model only for a finding the reviewer marks
+      architectural
+
+  triage:
+    patterns:
+      - '(?i)\b(logs?|error|exception|stack ?trace|alert)\b.*\b(check|repeating|reported|investigate)\b'
+      - '(?i)\b(check|why)\b.*\b(logs?|errors?|failing)\b'
+    delegation: >-
+      phase 1: cheap model reads the logs and answers exactly one question - is
+      this a known error or a systemic problem? main loop does not read logs
+    sub_model: claude-haiku-4-5-20251001
+    sub_effort: low
+    budget_soft: 100000
+    escalation: >-
+      open phase 2 (strong-model deep dive) ONLY with an evidenced systemic
+      cause from phase 1
+
+  mechanical:
+    patterns:
+      - '(?i)\b(bump|rename|remove|delete|drop|add)\b.*\b(column|field|config|configs|flag)\b'
+      - '(?i)\b(release|redeploy|rollout|migrate)\b'
+    delegation: >-
+      mid model, parallel pipeline when there are N items; main loop verifies
+      the first item then delegates the rest
+    sub_model: claude-sonnet-5
+    sub_effort: low
+    budget_soft: 400000
+    escalation: >-
+      if an item fails in a way the others will share, stop the pipeline and
+      report rather than retrying each
+
+  resolve:
+    patterns:
+      - '(?i)\bresolve\b.*\bissue'
+      - '(?i)\b(fix|finish)\b.*\bissues?/\d+'
+      - '(?i)\bissues?/\d+'
+    delegation: >-
+      mid model implements, main loop acts as review gate before commit
+    sub_model: claude-sonnet-5
+    sub_effort: medium
+    budget_soft: 500000
+    escalation: >-
+      if the issue turns out to need a design decision, stop and present
+      options instead of choosing silently
+
+  feature:
+    patterns:
+      - '(?i)\b(implement|build|automate)\b'
+      - '(?i)\bphase [a-z0-9]+\b.*\b(backend|frontend)\b'
+    delegation: >-
+      main loop orchestrates and plans, mid model builds phase by phase; each
+      phase ends with tests passing before the next starts
+    sub_model: claude-sonnet-5
+    sub_effort: high
+    budget_soft: 2000000
+    escalation: >-
+      re-plan rather than widen scope; a new requirement discovered mid-build
+      becomes a separate phase
+
+  investigate:
+    patterns:
+      - '(?i)\b(why did|why does|figure out why|root cause)\b'
+      - '(?i)\blooks like a bug\b'
+    delegation: >-
+      main loop reasons, subagents gather evidence in parallel
+    sub_model: claude-sonnet-5
+    sub_effort: high
+    budget_soft: 300000
+    escalation: >-
+      at the soft budget STOP and present what is known and what you propose
+      next - do not keep searching
+
+  discussion:
+    patterns:
+      - "(?i)\\b(let's discuss|what do you think|should we|options for)\\b"
+    delegation: "no delegation, no code changes"
+    sub_model: null
+    sub_effort: null
+    budget_soft: 50000
+    escalation: "if the discussion converges on work, reclassify before starting it"
+
+scope_policy: >-
+  A newly discovered problem that is RELATED to this task: fix it without asking
+  for confirmation. A problem that is UNRELATED: create a GitHub issue with
+  `gh issue create` and move on. Do not open a background-task chip and do not
+  start a new session.

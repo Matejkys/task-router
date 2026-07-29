@@ -1,0 +1,64 @@
+version: 1
+
+# Shadow mode: contract injection and budget notices on, rewrites off.
+enforce: false
+
+# Below this confidence the async Haiku refinement fires.
+confidence_threshold: 0.7
+
+# Confidence the rules classifier assigns. One class matching is a clean read;
+# several matching means the prompt is ambiguous and invites refinement.
+confidence_single: 0.9
+confidence_multi: 0.6
+confidence_none: 0.0
+
+# Confidence assigned when Haiku refines a classification.
+refined_confidence: 0.8
+
+# A prompt shorter than this, arriving in a session that has already produced at
+# least continuation_min_out_tokens of output, with no new URL or issue
+# reference, is treated as a follow-up rather than a new task.
+continuation_max_chars: 200
+continuation_min_out_tokens: 5000
+
+# Markers that mean "this is new work", not a follow-up.
+new_work_patterns:
+  - 'https?://'
+  - '\bissues?/\d+'
+  - '\bpull/\d+'
+  - '#\d{2,}'
+
+state_dir: ~/.claude/task-router/state
+telemetry_path: ~/.claude/task-router/telemetry.jsonl
+
+haiku_model: claude-haiku-4-5-20251001
+haiku_timeout_s: 30
+
+# The user explicitly demanding a model outranks the contract.
+user_override_patterns:
+  - '(?i)\b(use|run|put (this|it) on)\s+(opus|sonnet|haiku)\b'
+  - '(?i)\bmodel\s*[:=]\s*(opus|sonnet|haiku)'
+
+# How a subagent dispatch declares a justified override.
+agent_override_marker: 'model-override:'
+
+# Tool names the router acts on.
+dispatch_tools:
+  - Agent
+  - Task
+chip_tool: mcp__ccd_session__spawn_task
+chip_reason: >-
+  Router: unrelated findings do not become background-task chips. File it with
+  `gh issue create` and continue the current task.
+
+# Nudges injected back into the session. Reword these without touching Python.
+route_notice_template: 'ROUTER: {reason}'
+budget_notice_template: >-
+  BUDGET: {used} of {budget} output tokens for class {cls}. Stop and present
+  what you have and what you propose next, rather than continuing.
+
+# router report: how much evidence before proposing a change, and how often a
+# budget must be blown or a mandate overridden before it counts as wrong.
+min_samples_to_propose: 5
+exceeded_ratio_threshold: 0.5
+override_ratio_threshold: 0.5

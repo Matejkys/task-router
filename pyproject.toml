@@ -1,0 +1,20 @@
+[project]
+name = "task-router"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+# Flat "router/" layout with no build backend (uv init --bare): pytest's
+# default "prepend" import mode only puts tests/ on sys.path (it has no
+# __init__.py), never the repo root, so `import router` fails under plain
+# `uv run pytest` even though it works under `uv run python -m pytest`.
+# This is pytest's own documented fix, not a packaging workaround.
+pythonpath = ["."]
