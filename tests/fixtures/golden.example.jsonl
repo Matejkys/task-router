@@ -1,0 +1,17 @@
+{"prompt": "Resolve issue https://example.com/org/repo/issues/1088", "class": "resolve"}
+{"prompt": "Resolve these two issues by a single PR: https://example.com/org/repo/issues/1104", "class": "resolve"}
+{"prompt": "Please review https://example.com/org/repo/pull/1056 before I publish", "class": "pr_review"}
+{"prompt": "Describe this PR and then review it: https://example.com/org/repo/pull/1067", "class": "pr_review"}
+{"prompt": "Check the service logs for repeating errors", "class": "triage"}
+{"prompt": "Why does the deploy keep failing, check logs", "class": "triage"}
+{"prompt": "Implement Phase A backend for the merge feature", "class": "feature"}
+{"prompt": "I want to automate the redeploy after each release", "class": "mechanical"}
+{"prompt": "Remove the unused columns from all the configs", "class": "mechanical"}
+{"prompt": "Find the order forms in the backup archive", "class": "recon"}
+{"prompt": "Why did twelve records get reassigned to one user last Friday", "class": "investigate"}
+{"prompt": "Let's discuss how we should handle the API situation", "class": "discussion"}
+{"prompt": "Take a look at pull/902 - it only touches fixtures", "class": "pr_review"}
+{"prompt": "The nightly job silently stopped producing rows three days ago", "class": "investigate"}
+{"prompt": "Bump the pinned dependency and make sure the suite still passes", "class": "mechanical"}
+{"prompt": "We should probably split the orders module before adding more to it", "class": "discussion"}
+{"prompt": "Find out why the export endpoint returns 500 for large accounts", "class": "investigate"}
