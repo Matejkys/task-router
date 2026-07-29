@@ -1,0 +1,21 @@
+# This repository is public. Nothing derived from real sessions may be committed.
+
+# Aggregated session data: prompt excerpts with internal URLs and customer
+# names. Reproducible from analysis/agg_sessions.py.
+analysis/sessions.json
+
+# Golden-set fixture built from the local corpus. A paraphrased
+# golden.example.jsonl is committed in its place.
+tests/fixtures/golden.local.jsonl
+
+# Classification overlay carrying internal vocabulary and per-repo overrides.
+config/classes.local.yaml
+
+# Runtime state, telemetry and reports (reports may quote prompts)
+state/
+telemetry.jsonl
+reports/
+
+__pycache__/
+*.pyc
+.venv/
