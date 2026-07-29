@@ -178,7 +178,7 @@ differently.
 tools/task-router/
 ├── router/
 │   ├── classify.py      rules -> (class, confidence)
-│   ├── llm.py           Haiku fallback when confidence < threshold
+│   ├── llm.py           async Haiku refinement when confidence < threshold
 │   ├── continuation.py  follow-up detection from session state
 │   ├── contract.py      contract rendering
 │   ├── enforce.py       (class, agent_type) -> model + effort; honours the
@@ -189,7 +189,8 @@ tools/task-router/
 │   ├── classes.yaml         taxonomy, models, effort, budgets, generic patterns
 │   ├── classes.local.yaml   gitignored overlay: internal vocabulary
 │   └── settings.yaml        thresholds, paths, feature flags
-├── hooks/               three thin entry points
+├── hooks/               four thin entry points: prompt submit, async refine,
+│                        pre-tool-use, stop
 ├── analysis/            reproducible corpus aggregation
 └── tests/
 ```
@@ -233,9 +234,27 @@ Otherwise rules run, with Haiku as fallback. State goes to
 `additionalContext`.
 
 Latency: the rules path is plain Python with precompiled regexes, targeting
-under 100 ms, because this runs before every prompt. The Haiku call has a 3 s
-timeout; on timeout the best rules guess is emitted. The router must never block
+under 100 ms, because this runs before every prompt. The router must never block
 a prompt.
+
+**The Haiku fallback is asynchronous, and this is measured, not assumed.**
+`claude -p --model claude-haiku-4-5-*` takes 5.8–7.0 s on this machine (three
+runs), because each call starts a new CLI process. A synchronous call would
+therefore block every ambiguous prompt for about seven seconds. A native
+`prompt`-type hook is not an alternative either: its result cannot become
+`additionalContext`, only a permission decision.
+
+So refinement runs as a second `UserPromptSubmit` hook with
+`asyncRewake: true`. It does not block; when it finishes it exits with code 2 and
+writes the refined contract to stderr, which reaches the session as a system
+reminder. The cost of the 6.5 s is paid in the background, arriving a few seconds
+into a task the agent is still reading. It fires only when the rules path is
+unconfident — roughly 12.5% of prompts at measured coverage.
+
+Until the refinement lands, the synchronous hook emits an `unclassified`
+contract: no delegation mandate and no budget, only the scope policy. That
+degraded state is deliberately useful rather than dead, because on a Haiku
+failure or timeout it is also the final state.
 
 **2. `PreToolUse` on `Agent|Task` — enforcement.** Loads the active contract,
 looks up the mandated `model` and `effort` for the class and `subagent_type`,
@@ -316,7 +335,8 @@ come second. Disabling is one value in the config.
 - **Integration**: real hook payloads on stdin, asserting the shape of stdout
   JSON and the exit code. A hook that emits malformed JSON blocks the user's
   work, which makes this the most important test in the project.
-- **Latency**: rules path under 100 ms.
+- **Latency**: rules path under 100 ms, asserted as a test rather than a hope,
+  since it runs before every prompt.
 
 ## Privacy
 
