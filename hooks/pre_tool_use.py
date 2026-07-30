@@ -44,7 +44,8 @@ def main(payload: dict) -> None:
     if tool_name in settings.dispatch_tools:
         classes = load_classes(paths.CLASSES_YAML, paths.CLASSES_LOCAL_YAML)
         tool_input = payload.get("tool_input") or {}
-        decision = decide(tool_input, classes.get(state.cls), state, settings)
+        spec = classes.get(state.cls)
+        decision = decide(tool_input, spec, state, settings)
         if decision.updated_input is not None:
             state.overrides.append({
                 "from": tool_input.get("model"),
@@ -57,6 +58,22 @@ def main(payload: dict) -> None:
                 notes.append(
                     settings.route_notice_template.format(reason=decision.reason)
                 )
+        elif (
+            decision.precedence in ("user", "agent")
+            and spec is not None
+            and spec.sub_model
+            and tool_input.get("model") != spec.sub_model
+        ):
+            # A real mandate existed and diverged, but a higher-precedence
+            # actor (user or agent) won, so the router deferred. Record it
+            # anyway: this is the override-abuse signal `router report` is
+            # built to surface, and it must fire regardless of enforce mode.
+            state.overrides.append({
+                "from": tool_input.get("model"),
+                "to": spec.sub_model,
+                "precedence": decision.precedence,
+                "enforced": False,
+            })
 
     tokens, new_offset = read_increment(
         Path(payload["transcript_path"]), state.transcript_offset

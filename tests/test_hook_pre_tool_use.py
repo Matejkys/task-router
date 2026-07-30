@@ -58,6 +58,57 @@ def test_shadow_mode_logs_but_does_not_rewrite(tmp_path):
         "shadow mode must still record what it would have done"
 
 
+def test_user_override_is_recorded(tmp_path):
+    # The user named the model explicitly, diverging from the pr_review
+    # mandate (claude-sonnet-5). The router must defer - no updatedInput -
+    # but still record the override so `router report` can surface it.
+    seed_state(tmp_path, user_override=True)
+    out = run_hook(_agent_payload(tmp_path), tmp_path, enforce=True)
+    assert "updatedInput" not in out.get("hookSpecificOutput", {})
+    overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
+    assert overrides == [{
+        "from": "opus", "to": "claude-sonnet-5",
+        "precedence": "user", "enforced": False,
+    }]
+
+
+def test_agent_override_is_recorded(tmp_path):
+    # The dispatch carries a justified override marker with a reason. The
+    # router must defer - no updatedInput - but still record the override.
+    seed_state(tmp_path, user_override=False)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Agent",
+        "tool_input": {
+            "model": "opus",
+            "prompt": "review the diff\nmodel-override: needs cross-file reasoning",
+        },
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    out = run_hook(payload, tmp_path, enforce=True)
+    assert "updatedInput" not in out.get("hookSpecificOutput", {})
+    overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
+    assert overrides == [{
+        "from": "opus", "to": "claude-sonnet-5",
+        "precedence": "agent", "enforced": False,
+    }]
+
+
+def test_no_override_recorded_when_actor_matches_mandate(tmp_path):
+    # The user named a model, but it happens to equal the mandate - nothing
+    # was actually overridden, so no entry should be recorded.
+    seed_state(tmp_path, user_override=True)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Agent",
+        "tool_input": {"model": "claude-sonnet-5", "prompt": "review the diff"},
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    run_hook(payload, tmp_path, enforce=True)
+    overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
+    assert overrides == []
+
+
 def test_spawn_task_denied_when_enforcing(tmp_path):
     seed_state(tmp_path)
     out = run_hook(

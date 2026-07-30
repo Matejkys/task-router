@@ -1946,6 +1946,63 @@ def test_budget_warning_fires_once(tmp_path):
 def test_unknown_session_is_a_no_op(tmp_path):
     out = run_hook(_agent_payload(tmp_path), tmp_path, enforce=True)
     assert out == {}
+
+
+# The three tests below record overrides for the case decide() returns
+# updated_input=None with precedence "user"/"agent" - a real mandate was
+# overridden by a higher-precedence actor. Without this, `router report`'s
+# override signal could never fire for the abuse case it exists to catch.
+
+
+def test_user_override_is_recorded(tmp_path):
+    # The user named the model explicitly, diverging from the pr_review
+    # mandate (claude-sonnet-5). The router must defer - no updatedInput -
+    # but still record the override so `router report` can surface it.
+    seed_state(tmp_path, user_override=True)
+    out = run_hook(_agent_payload(tmp_path), tmp_path, enforce=True)
+    assert "updatedInput" not in out.get("hookSpecificOutput", {})
+    overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
+    assert overrides == [{
+        "from": "opus", "to": "claude-sonnet-5",
+        "precedence": "user", "enforced": False,
+    }]
+
+
+def test_agent_override_is_recorded(tmp_path):
+    # The dispatch carries a justified override marker with a reason. The
+    # router must defer - no updatedInput - but still record the override.
+    seed_state(tmp_path, user_override=False)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Agent",
+        "tool_input": {
+            "model": "opus",
+            "prompt": "review the diff\nmodel-override: needs cross-file reasoning",
+        },
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    out = run_hook(payload, tmp_path, enforce=True)
+    assert "updatedInput" not in out.get("hookSpecificOutput", {})
+    overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
+    assert overrides == [{
+        "from": "opus", "to": "claude-sonnet-5",
+        "precedence": "agent", "enforced": False,
+    }]
+
+
+def test_no_override_recorded_when_actor_matches_mandate(tmp_path):
+    # The user named a model, but it happens to equal the mandate - nothing
+    # was actually overridden, so no entry should be recorded.
+    seed_state(tmp_path, user_override=True)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Agent",
+        "tool_input": {"model": "claude-sonnet-5", "prompt": "review the diff"},
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    run_hook(payload, tmp_path, enforce=True)
+    overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
+    assert overrides == []
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2016,7 +2073,8 @@ def main(payload: dict) -> None:
     if tool_name in settings.dispatch_tools:
         classes = load_classes(paths.CLASSES_YAML, paths.CLASSES_LOCAL_YAML)
         tool_input = payload.get("tool_input") or {}
-        decision = decide(tool_input, classes.get(state.cls), state, settings)
+        spec = classes.get(state.cls)
+        decision = decide(tool_input, spec, state, settings)
         if decision.updated_input is not None:
             state.overrides.append({
                 "from": tool_input.get("model"),
@@ -2029,6 +2087,22 @@ def main(payload: dict) -> None:
                 notes.append(
                     settings.route_notice_template.format(reason=decision.reason)
                 )
+        elif (
+            decision.precedence in ("user", "agent")
+            and spec is not None
+            and spec.sub_model
+            and tool_input.get("model") != spec.sub_model
+        ):
+            # A real mandate existed and diverged, but a higher-precedence
+            # actor (user or agent) won, so the router deferred. Record it
+            # anyway: this is the override-abuse signal `router report` is
+            # built to surface, and it must fire regardless of enforce mode.
+            state.overrides.append({
+                "from": tool_input.get("model"),
+                "to": spec.sub_model,
+                "precedence": decision.precedence,
+                "enforced": False,
+            })
 
     tokens, new_offset = read_increment(
         Path(payload["transcript_path"]), state.transcript_offset
@@ -2062,7 +2136,7 @@ if __name__ == "__main__":
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_hook_pre_tool_use.py -v`
-Expected: PASS, 6 passed
+Expected: PASS, 9 passed
 
 - [ ] **Step 6: Commit**
 
