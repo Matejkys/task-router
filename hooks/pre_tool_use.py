@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""PreToolUse: enforce delegation, deny chips, watch the budget.
+
+Three concerns share one hook because they share one state read. Fails open on
+any error via hookio.run: exit 0, no stdout, session unaffected.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from router import hookio, paths
+from router.budget import read_increment
+from router.config import load_classes, load_settings
+from router.enforce import decide
+from router.state import load_state, save_state
+
+
+def main(payload: dict) -> None:
+    settings = load_settings(paths.SETTINGS_YAML)
+    state_dir = paths.state_dir_override() or settings.state_dir
+    state = load_state(state_dir, payload["session_id"])
+    if state is None:
+        return  # no contract for this session; do nothing at all
+
+    override = paths.enforce_override()
+    enforce = settings.enforce if override is None else override
+    tool_name = payload.get("tool_name", "")
+
+    if tool_name == settings.chip_tool and enforce:
+        hookio.emit(
+            "PreToolUse",
+            permissionDecision="deny",
+            permissionDecisionReason=settings.chip_reason,
+        )
+        return
+
+    notes: list[str] = []
+    updated_input = None
+
+    if tool_name in settings.dispatch_tools:
+        classes = load_classes(paths.CLASSES_YAML, paths.CLASSES_LOCAL_YAML)
+        tool_input = payload.get("tool_input") or {}
+        decision = decide(tool_input, classes.get(state.cls), state, settings)
+        if decision.updated_input is not None:
+            state.overrides.append({
+                "from": tool_input.get("model"),
+                "to": decision.updated_input["model"],
+                "precedence": decision.precedence,
+                "enforced": enforce,
+            })
+            if enforce:
+                updated_input = decision.updated_input
+                notes.append(
+                    settings.route_notice_template.format(reason=decision.reason)
+                )
+
+    tokens, new_offset = read_increment(
+        Path(payload["transcript_path"]), state.transcript_offset
+    )
+    state.out_tokens += tokens
+    state.transcript_offset = new_offset
+    if (
+        state.budget_soft
+        and state.out_tokens > state.budget_soft
+        and not state.budget_notified
+    ):
+        state.budget_notified = True
+        notes.append(
+            settings.budget_notice_template.format(
+                used=state.out_tokens, budget=state.budget_soft, cls=state.cls
+            )
+        )
+
+    save_state(state_dir, state)
+    hookio.emit(
+        "PreToolUse",
+        updatedInput=updated_input,
+        additionalContext="\n".join(notes) if notes else None,
+    )
+
+
+if __name__ == "__main__":
+    hookio.run(main)

@@ -16,3 +16,13 @@ STATE_DIR_ENV = "TASK_ROUTER_STATE_DIR"
 def state_dir_override() -> Path | None:
     raw = os.environ.get(STATE_DIR_ENV)
     return Path(raw) if raw else None
+
+
+ENFORCE_ENV = "TASK_ROUTER_ENFORCE"
+
+
+def enforce_override() -> bool | None:
+    raw = os.environ.get(ENFORCE_ENV)
+    if raw is None:
+        return None
+    return raw.strip() in {"1", "true", "yes"}
