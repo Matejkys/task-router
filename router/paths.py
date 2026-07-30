@@ -26,3 +26,11 @@ def enforce_override() -> bool | None:
     if raw is None:
         return None
     return raw.strip() in {"1", "true", "yes"}
+
+
+TELEMETRY_ENV = "TASK_ROUTER_TELEMETRY"
+
+
+def telemetry_override() -> Path | None:
+    raw = os.environ.get(TELEMETRY_ENV)
+    return Path(raw) if raw else None
