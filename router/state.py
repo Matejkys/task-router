@@ -35,15 +35,21 @@ def _path(state_dir: Path, session_id: str) -> Path:
 
 
 def load_state(state_dir: Path, session_id: str) -> SessionState | None:
-    path = _path(state_dir, session_id)
     try:
+        path = _path(state_dir, session_id)
         return SessionState(**json.loads(path.read_text()))
     except (OSError, ValueError, TypeError):
         # Missing, unreadable or corrupt state degrades to "no state"; a hook
-        # that died here would block the user's work.
+        # that died here would block the user's work. This covers a session_id
+        # that cannot even be encoded into a filename.
         return None
 
 
+# Deliberately asymmetric with load_state: a failed write must stay loud.
+# hookio.run catches this, reports it on stderr and exits 0, so the session
+# is unharmed while the failure stays visible. Swallowing it here would be
+# worse than crashing: the router would carry on believing it had persisted
+# state it had not. Do not wrap this in the same degrade-to-None handling.
 def save_state(state_dir: Path, state: SessionState) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
     path = _path(state_dir, state.session_id)

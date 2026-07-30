@@ -75,6 +75,11 @@ def test_unreadable_state_degrades_to_none(tmp_path):
     assert load_state(tmp_path, "s1") is None
 
 
+def test_unencodable_session_id_degrades_to_none(tmp_path):
+    # A lone surrogate cannot be UTF-8 encoded; _path must not crash the hook.
+    assert load_state(tmp_path, "sess-\ud800-bad") is None
+
+
 def test_short_followup_in_a_progressed_session_is_continuation():
     st = _state(out_tokens=SETTINGS.continuation_min_out_tokens)
     assert is_continuation("that's fine, keep going", st, SETTINGS) is True

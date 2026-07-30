@@ -857,6 +857,11 @@ def test_unreadable_state_degrades_to_none(tmp_path):
     assert load_state(tmp_path, "s1") is None
 
 
+def test_unencodable_session_id_degrades_to_none(tmp_path):
+    # A lone surrogate cannot be UTF-8 encoded; _path must not crash the hook.
+    assert load_state(tmp_path, "sess-\ud800-bad") is None
+
+
 def test_short_followup_in_a_progressed_session_is_continuation():
     st = _state(out_tokens=SETTINGS.continuation_min_out_tokens)
     assert is_continuation("that's fine, keep going", st, SETTINGS) is True
@@ -926,12 +931,13 @@ def _path(state_dir: Path, session_id: str) -> Path:
 
 
 def load_state(state_dir: Path, session_id: str) -> SessionState | None:
-    path = _path(state_dir, session_id)
     try:
+        path = _path(state_dir, session_id)
         return SessionState(**json.loads(path.read_text()))
     except (OSError, ValueError, TypeError):
         # Missing, unreadable or corrupt state degrades to "no state"; a hook
-        # that died here would block the user's work.
+        # that died here would block the user's work. This covers a session_id
+        # that cannot even be encoded into a filename.
         return None
 
 
@@ -975,7 +981,7 @@ def is_continuation(
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_state.py -v`
-Expected: PASS, 13 passed
+Expected: PASS, 14 passed
 
 - [ ] **Step 6: Commit**
 
