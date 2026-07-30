@@ -61,3 +61,39 @@ def test_stop_hook_writes_the_paired_outcome(tmp_path):
     assert row["outcome"]["out_tokens"] == 250
     assert row["outcome"]["exceeded"] is True
     assert row["overrides"][0]["to"] == "claude-sonnet-5"
+
+
+def test_stop_hook_persists_updated_state_to_disk(tmp_path):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "s1.json").write_text(json.dumps({
+        "session_id": "s1", "cls": "triage", "confidence": 0.9,
+        "source": "rule:logs", "budget_soft": 100, "budget_notified": False,
+        "transcript_offset": 0, "out_tokens": 0, "user_override": False,
+        "overrides": [],
+    }))
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "assistant",
+        "message": {"model": "m", "usage": {"output_tokens": 250}},
+    }) + "\n")
+
+    proc = subprocess.run(
+        [sys.executable, str(HOOK)],
+        input=json.dumps({"session_id": "s1", "hook_event_name": "Stop",
+                          "transcript_path": str(transcript)}),
+        capture_output=True, text=True,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO),
+             "TASK_ROUTER_STATE_DIR": str(state_dir),
+             "TASK_ROUTER_TELEMETRY": str(tmp_path / "telemetry.jsonl")},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stderr == "", f"hook wrote a fail-open diagnostic: {proc.stderr}"
+
+    # The telemetry row alone can't tell "mutated" from "mutated and
+    # persisted" apart, since it is built from the same in-memory state
+    # object. Re-open what the hook wrote to disk to check the mutation
+    # that a later PreToolUse/Stop's load_state call would actually see.
+    persisted = json.loads((state_dir / "s1.json").read_text())
+    assert persisted["out_tokens"] == 250, "mutation not persisted to disk"
+    assert persisted["transcript_offset"] == transcript.stat().st_size
