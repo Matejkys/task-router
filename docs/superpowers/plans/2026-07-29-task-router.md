@@ -1128,7 +1128,7 @@ git commit -m "feat: task contract rendering"
 
 Each hook keeps a three-line `sys.path` preamble so it runs as a standalone script; that preamble is deliberately not abstracted, since it must execute *before* `router` is importable.
 
-Hook input fields used: `session_id`, `prompt`, `transcript_path`.
+Hook input fields used: `session_id` and `prompt` only. This hook deliberately does not read `transcript_path` — token accounting belongs to `pre_tool_use.py` and `stop.py`, and a new classification carries the offset forward from prior state (or 0 for a fresh session).
 
 - [ ] **Step 1: Write the failing test for `hookio`**
 
@@ -1694,6 +1694,19 @@ def test_truncated_file_resets_instead_of_reading_garbage(tmp_path):
     tokens, new_offset = read_increment(t, offset)
     assert tokens == 3
     assert new_offset == t.stat().st_size
+
+
+def test_directory_in_place_of_transcript_is_zero_not_a_crash(tmp_path):
+    path = tmp_path / "t.jsonl"
+    path.mkdir()  # stat() succeeds; open() raises IsADirectoryError
+    assert read_increment(path, 0) == (0, 0)
+
+
+def test_null_message_is_skipped_not_a_crash(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_text(json.dumps({"type": "assistant", "message": None}) + "\n" + _line(11))
+    tokens, _ = read_increment(t, 0)
+    assert tokens == 11
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1721,15 +1734,16 @@ def read_increment(transcript_path: Path, offset: int) -> tuple[int, int]:
     """
     try:
         size = transcript_path.stat().st_size
+        start = 0 if offset > size else offset
+        with transcript_path.open("r", errors="replace") as fh:
+            fh.seek(start)
+            data = fh.read()
     except OSError:
+        # Missing, unreadable, or not a regular file. A hook that died here
+        # would block the user's work.
         return 0, 0
 
-    start = 0 if offset > size else offset
     tokens = 0
-    with transcript_path.open("r", errors="replace") as fh:
-        fh.seek(start)
-        data = fh.read()
-
     for line in data.splitlines():
         if not line.strip():
             continue
@@ -1739,7 +1753,7 @@ def read_increment(transcript_path: Path, offset: int) -> tuple[int, int]:
             continue  # a partially flushed final line; counted next time
         if rec.get("type") != "assistant":
             continue
-        usage = rec.get("message", {}).get("usage") or {}
+        usage = (rec.get("message") or {}).get("usage") or {}
         tokens += usage.get("output_tokens") or 0
 
     return tokens, size
@@ -1748,7 +1762,7 @@ def read_increment(transcript_path: Path, offset: int) -> tuple[int, int]:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_budget.py -v`
-Expected: PASS, 5 passed
+Expected: PASS, 7 passed
 
 - [ ] **Step 5: Commit**
 

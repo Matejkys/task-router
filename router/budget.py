@@ -14,15 +14,16 @@ def read_increment(transcript_path: Path, offset: int) -> tuple[int, int]:
     """
     try:
         size = transcript_path.stat().st_size
+        start = 0 if offset > size else offset
+        with transcript_path.open("r", errors="replace") as fh:
+            fh.seek(start)
+            data = fh.read()
     except OSError:
+        # Missing, unreadable, or not a regular file. A hook that died here
+        # would block the user's work.
         return 0, 0
 
-    start = 0 if offset > size else offset
     tokens = 0
-    with transcript_path.open("r", errors="replace") as fh:
-        fh.seek(start)
-        data = fh.read()
-
     for line in data.splitlines():
         if not line.strip():
             continue
@@ -32,7 +33,7 @@ def read_increment(transcript_path: Path, offset: int) -> tuple[int, int]:
             continue  # a partially flushed final line; counted next time
         if rec.get("type") != "assistant":
             continue
-        usage = rec.get("message", {}).get("usage") or {}
+        usage = (rec.get("message") or {}).get("usage") or {}
         tokens += usage.get("output_tokens") or 0
 
     return tokens, size

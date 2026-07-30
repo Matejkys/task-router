@@ -48,3 +48,16 @@ def test_truncated_file_resets_instead_of_reading_garbage(tmp_path):
     tokens, new_offset = read_increment(t, offset)
     assert tokens == 3
     assert new_offset == t.stat().st_size
+
+
+def test_directory_in_place_of_transcript_is_zero_not_a_crash(tmp_path):
+    path = tmp_path / "t.jsonl"
+    path.mkdir()  # stat() succeeds; open() raises IsADirectoryError
+    assert read_increment(path, 0) == (0, 0)
+
+
+def test_null_message_is_skipped_not_a_crash(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_text(json.dumps({"type": "assistant", "message": None}) + "\n" + _line(11))
+    tokens, _ = read_increment(t, 0)
+    assert tokens == 11
