@@ -28,6 +28,7 @@ def run_hook(payload: dict, state_dir: Path, enforce: bool) -> dict:
              "TASK_ROUTER_ENFORCE": "1" if enforce else "0"},
     )
     assert proc.returncode == 0, proc.stderr
+    assert proc.stderr == "", f"hook wrote a fail-open diagnostic: {proc.stderr}"
     return json.loads(proc.stdout) if proc.stdout.strip() else {}
 
 

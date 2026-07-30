@@ -7,7 +7,7 @@ REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / "hooks/user_prompt_submit.py"
 
 
-def run_hook(payload: dict, state_dir: Path) -> dict:
+def run_hook(payload: dict, state_dir: Path, expect_stderr: bool = False) -> dict:
     proc = subprocess.run(
         [sys.executable, str(HOOK)],
         input=json.dumps(payload),
@@ -17,6 +17,10 @@ def run_hook(payload: dict, state_dir: Path) -> dict:
              "PYTHONPATH": str(REPO)},
     )
     assert proc.returncode == 0, f"hook must never fail: {proc.stderr}"
+    if expect_stderr:
+        assert proc.stderr != "", "expected a fail-open diagnostic on stderr"
+    else:
+        assert proc.stderr == "", f"hook wrote a fail-open diagnostic: {proc.stderr}"
     return json.loads(proc.stdout) if proc.stdout.strip() else {}
 
 
@@ -76,3 +80,4 @@ def test_garbage_stdin_exits_zero_and_emits_nothing(tmp_path):
     )
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+    assert proc.stderr != "", "expected a fail-open diagnostic on stderr"
