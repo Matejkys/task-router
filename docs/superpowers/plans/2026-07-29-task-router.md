@@ -975,7 +975,7 @@ def is_continuation(
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_state.py -v`
-Expected: PASS, 8 passed
+Expected: PASS, 13 passed
 
 - [ ] **Step 6: Commit**
 
