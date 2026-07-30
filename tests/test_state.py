@@ -40,6 +40,41 @@ def test_corrupt_state_is_none_not_a_crash(tmp_path):
     assert load_state(tmp_path, "s1") is None
 
 
+def test_wellformed_session_id_keeps_its_own_name(tmp_path):
+    save_state(tmp_path, _state(session_id="a1b2-c3d4_e5"))
+    assert (tmp_path / "a1b2-c3d4_e5.json").exists()
+
+
+def test_traversal_cannot_escape_the_state_dir(tmp_path):
+    save_state(tmp_path, _state(session_id="../../../../etc/passwd"))
+    written = list(tmp_path.iterdir())
+    assert len(written) == 1
+    assert written[0].parent.resolve() == tmp_path.resolve()
+
+
+def test_ids_differing_only_in_stripped_characters_do_not_collide(tmp_path):
+    save_state(tmp_path, _state(session_id="a/b", out_tokens=1))
+    save_state(tmp_path, _state(session_id="a:b", out_tokens=2))
+    first = load_state(tmp_path, "a/b")
+    second = load_state(tmp_path, "a:b")
+    assert first is not None and first.out_tokens == 1
+    assert second is not None and second.out_tokens == 2
+
+
+def test_empty_session_id_does_not_collide_with_another_stripped_id(tmp_path):
+    save_state(tmp_path, _state(session_id="", out_tokens=7))
+    save_state(tmp_path, _state(session_id="///", out_tokens=9))
+    empty = load_state(tmp_path, "")
+    slashes = load_state(tmp_path, "///")
+    assert empty is not None and empty.out_tokens == 7
+    assert slashes is not None and slashes.out_tokens == 9
+
+
+def test_unreadable_state_degrades_to_none(tmp_path):
+    (tmp_path / "s1.json").mkdir()  # read_text on a directory raises OSError
+    assert load_state(tmp_path, "s1") is None
+
+
 def test_short_followup_in_a_progressed_session_is_continuation():
     st = _state(out_tokens=SETTINGS.continuation_min_out_tokens)
     assert is_continuation("that's fine, keep going", st, SETTINGS) is True

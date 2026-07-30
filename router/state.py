@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -25,17 +26,21 @@ class SessionState:
 def _path(state_dir: Path, session_id: str) -> Path:
     # session_id comes from the harness, but never let it escape the directory.
     safe = "".join(c for c in session_id if c.isalnum() or c in "-_")
+    if safe != session_id:
+        # Sanitisation dropped characters, so distinct ids could otherwise
+        # collide on one file. Disambiguate with a digest of the raw id.
+        digest = hashlib.sha256(session_id.encode()).hexdigest()[:16]
+        safe = f"{safe}-{digest}" if safe else digest
     return state_dir / f"{safe}.json"
 
 
 def load_state(state_dir: Path, session_id: str) -> SessionState | None:
     path = _path(state_dir, session_id)
-    if not path.exists():
-        return None
     try:
         return SessionState(**json.loads(path.read_text()))
-    except (ValueError, TypeError):
-        # Corrupt state must degrade to "no state", never break the session.
+    except (OSError, ValueError, TypeError):
+        # Missing, unreadable or corrupt state degrades to "no state"; a hook
+        # that died here would block the user's work.
         return None
 
 
