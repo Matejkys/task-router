@@ -2914,7 +2914,22 @@ def _run(hook: str, payload: dict, env: dict) -> subprocess.CompletedProcess:
         env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO), **env},
     )
     assert proc.returncode in (0, 2), f"{hook}: {proc.stderr}"
+    # A hook that crashes still exits 0 (hookio.run fails open) with empty
+    # stdout, so asserting on returncode/stdout alone cannot tell a broken
+    # hook from a legitimate no-op. stderr is the tell: hookio.run prints the
+    # exception there before swallowing it. See Task 8/9 for the same gap.
+    assert proc.stderr == "", f"{hook} wrote a fail-open diagnostic: {proc.stderr}"
     return proc
+
+
+def _stdout_json(proc: subprocess.CompletedProcess) -> dict:
+    # hookio.emit stays silent (empty stdout) instead of printing an empty
+    # envelope when a hook has nothing to say - e.g. pre_tool_use.py in
+    # shadow mode when no budget notice is due yet. That is the documented
+    # success path, not a failure, so it must not be handed to json.loads
+    # unguarded (see tests/test_hook_pre_tool_use.py's run_hook for the same
+    # guard against the same legitimate case).
+    return json.loads(proc.stdout) if proc.stdout.strip() else {}
 
 
 def test_full_cycle_in_shadow_mode(tmp_path):
@@ -2937,7 +2952,7 @@ def test_full_cycle_in_shadow_mode(tmp_path):
         "prompt": "Please review https://example.com/o/r/pull/42",
         "transcript_path": str(transcript),
     }, env)
-    assert "class=pr_review" in json.loads(submit.stdout)[
+    assert "class=pr_review" in _stdout_json(submit)[
         "hookSpecificOutput"]["additionalContext"]
 
     pre = _run("pre_tool_use.py", {
@@ -2946,7 +2961,7 @@ def test_full_cycle_in_shadow_mode(tmp_path):
         "tool_input": {"model": "opus", "prompt": "review it"},
         "transcript_path": str(transcript),
     }, env)
-    hso = json.loads(pre.stdout).get("hookSpecificOutput", {})
+    hso = _stdout_json(pre).get("hookSpecificOutput", {})
     assert "updatedInput" not in hso, "shadow mode must not rewrite"
 
     _run("stop.py", {
@@ -2981,7 +2996,7 @@ def test_enforcing_the_same_cycle_rewrites(tmp_path):
         "tool_input": {"model": "opus", "prompt": "review it"},
         "transcript_path": str(transcript),
     }, env)
-    hso = json.loads(pre.stdout)["hookSpecificOutput"]
+    hso = _stdout_json(pre)["hookSpecificOutput"]
     assert hso["updatedInput"]["model"] == "claude-sonnet-5"
     assert "claude-sonnet-5" in hso["additionalContext"]
 ```
@@ -2990,6 +3005,20 @@ def test_enforcing_the_same_cycle_rewrites(tmp_path):
 
 Run: `uv run pytest tests/test_end_to_end.py -v`
 Expected: initially FAIL if any hook misbehaves; after Tasks 5–11 it should PASS, 2 passed. Fix the offending hook rather than the test.
+
+**Amendment (Task 12 execution):** the brief's own `_run`/assertions as originally
+drafted above had a real bug, independent of the mandated stderr-silence
+assertion: in shadow mode with no budget notice yet, `pre_tool_use.py`
+legitimately prints nothing at all (`hookio.emit`'s documented "stay silent
+rather than emit an empty envelope" contract - see `router/hookio.py` and the
+already-passing `test_shadow_mode_logs_but_does_not_rewrite` in
+`tests/test_hook_pre_tool_use.py`, which guards the same case). Calling
+`json.loads(pre.stdout)` unguarded on that empty string raises
+`JSONDecodeError` on the real, correctly-behaving hook - not a hook defect,
+a test defect. Fixed by adding `_stdout_json()`, the same
+"parse only if non-empty" guard `test_hook_pre_tool_use.py`'s `run_hook`
+already uses, applied at every stdout-parsing call site above. Production
+code under `hooks/`/`router/` was not touched to make this pass.
 
 - [ ] **Step 3: Run the whole suite and the latency check**
 

@@ -1,0 +1,137 @@
+# task-router
+
+Routes agent work by *kind of operation* instead of by guesswork, and enforces
+the delegation plan it decides on, via Claude Code hooks.
+
+Built on a measured corpus of 41 real sessions. The headline finding: task
+difficulty is **not** predictable from prompt text — correlation of prompt
+length with output tokens is r=+0.24, and variance within a single task category
+runs 36x to 125x. Two near-identical prompts against the same log dashboard cost
+28K and 3,501K output tokens respectively. So this does not try to guess
+difficulty. It classifies the kind of operation, which *is* readable, and
+mandates how the work should be delegated.
+
+The model of the main loop is deliberately out of scope: hooks cannot change it.
+The lever is delegation, which `PreToolUse` can enforce.
+
+## Install
+
+```bash
+uv sync
+uv run pytest
+```
+
+Then add the three hook entries below to `~/.claude/settings.json` (see
+"Hooks").
+
+Ships in **shadow mode** (`config/settings.yaml`, `enforce: false`): the contract
+is injected and budgets are watched, but nothing is rewritten and no tool is
+denied. Do not expect shadow mode to improve anything — advisory guidance
+demonstrably does not change behaviour. It is there to calibrate the classifier
+and the budgets before they get teeth.
+
+## Hooks
+
+Three entries in `~/.claude/settings.json`:
+
+- `UserPromptSubmit` -> `hooks/user_prompt_submit.py` (synchronous, <100 ms)
+- `UserPromptSubmit` -> `hooks/refine_class.py` (`asyncRewake: true`)
+- `PreToolUse` -> `hooks/pre_tool_use.py` (matcher `Agent|Task|mcp__ccd_session__spawn_task|Bash|Edit|Write|Read`)
+- `Stop` -> `hooks/stop.py`
+
+These keys go **inside** your existing top-level `"hooks"` object, merged with
+whatever you already have — if you already have hooks on any of these same
+events (`UserPromptSubmit`, `PreToolUse`, `Stop`), append to that event's array
+rather than replacing it. Back your settings up first:
+
+```bash
+cp ~/.claude/settings.json ~/.claude/settings.json.bak-$(date +%Y%m%d)
+```
+
+```json
+{
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/Users/matejkys/Development/tools/task-router/.venv/bin/python /Users/matejkys/Development/tools/task-router/hooks/user_prompt_submit.py",
+          "timeout": 10,
+          "statusMessage": "routing task"
+        },
+        {
+          "type": "command",
+          "command": "/Users/matejkys/Development/tools/task-router/.venv/bin/python /Users/matejkys/Development/tools/task-router/hooks/refine_class.py",
+          "asyncRewake": true,
+          "timeout": 60
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Agent|Task|mcp__ccd_session__spawn_task|Bash|Edit|Write|Read",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/Users/matejkys/Development/tools/task-router/.venv/bin/python /Users/matejkys/Development/tools/task-router/hooks/pre_tool_use.py",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/Users/matejkys/Development/tools/task-router/.venv/bin/python /Users/matejkys/Development/tools/task-router/hooks/stop.py",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Tuning
+
+```bash
+uv run python -m router.report
+```
+
+Recomputes per-class medians and p75 from telemetry and *proposes* budget
+changes. It never writes config: a router that retunes itself silently detunes
+itself. Apply suggestions by hand to `config/classes.yaml`.
+
+## Configuration
+
+- `config/classes.yaml` — taxonomy, models, effort, budgets, generic patterns.
+- `config/classes.local.yaml` — gitignored overlay for internal vocabulary.
+  Adds patterns to existing classes and may define new ones; never replaces a
+  base class's pattern list.
+- `config/settings.yaml` — thresholds, paths, `enforce`.
+
+## Privacy
+
+This repository is public. Nothing derived from real sessions is committed:
+`analysis/sessions.json`, `tests/fixtures/golden.local.jsonl`,
+`config/classes.local.yaml`, `state/`, `telemetry.jsonl` and `reports/` are all
+gitignored. `tests/fixtures/golden.example.jsonl` is paraphrased so the suite
+runs on a fresh clone; the coverage test reports which fixture it used.
+
+## Before enforcing
+
+Shadow mode is not the end state. Before setting `enforce: true` in
+`config/settings.yaml`:
+
+1. Run `uv run python analysis/agg_sessions.py 14`, then
+   `uv run python analysis/build_golden.py`, then **correct every label by
+   hand** — `build_golden.py` writes the classifier's own guesses, and a fixture
+   of its own guesses tests nothing.
+2. Let shadow mode run for a week, then `uv run python -m router.report`.
+3. Compare the proposed budgets with `config/classes.yaml`. Several classes have
+   n=3 or n=4 in the original corpus, so expect real movement.
+4. Only then flip `enforce: true`, and watch the override rate: a class
+   overridden in more than half its sessions has a wrong mandate, not a
+   disobedient agent.
