@@ -34,3 +34,11 @@ TELEMETRY_ENV = "TASK_ROUTER_TELEMETRY"
 def telemetry_override() -> Path | None:
     raw = os.environ.get(TELEMETRY_ENV)
     return Path(raw) if raw else None
+
+
+HAIKU_FAKE_ENV = "TASK_ROUTER_FAKE_HAIKU"
+
+
+def haiku_fake_override() -> str | None:
+    """Test-only: return a class name instead of spawning the Claude CLI."""
+    return os.environ.get(HAIKU_FAKE_ENV) or None
