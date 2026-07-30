@@ -1296,8 +1296,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from router.config import load_classes
+
 REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / "hooks/user_prompt_submit.py"
+CLASSES = load_classes(REPO / "config/classes.yaml", None)
 
 
 def run_hook(payload: dict, state_dir: Path, expect_stderr: bool = False) -> dict:
@@ -1352,6 +1355,41 @@ def test_followup_reuses_the_stored_class(tmp_path):
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "class=triage" in ctx
     assert "source=continuation" in ctx
+
+
+def test_new_task_starts_its_own_budget_at_zero_tokens(tmp_path):
+    # Budgets are per-task/per-class (the contract advertises "BUDGET soft N
+    # output tokens for class X"). A genuine new task (not a continuation)
+    # must not inherit the prior task's cumulative out_tokens - that would
+    # measure the new class's budget against lifetime session tokens and
+    # trip the budget notice on the very first tool call. The transcript
+    # offset, however, is not per-task: it must still carry forward so the
+    # transcript is not re-counted from the start.
+    state_dir = tmp_path
+    (state_dir / "s5.json").write_text(json.dumps({
+        "session_id": "s5", "cls": "recon", "confidence": 0.9,
+        "source": "rule:find", "budget_soft": CLASSES["recon"].budget_soft,
+        "budget_notified": False, "transcript_offset": 777,
+        "out_tokens": 200_000, "user_override": False, "overrides": [],
+    }))
+
+    # A URL and an issue reference both mark this as new work, so it cannot
+    # be mistaken for a continuation regardless of prior out_tokens/length.
+    out = run_hook(
+        {"session_id": "s5", "hook_event_name": "UserPromptSubmit",
+         "prompt": "Resolve issue https://example.com/o/r/issues/2099",
+         "transcript_path": str(tmp_path / "t.jsonl")},
+        state_dir,
+    )
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "class=resolve" in ctx
+    assert "source=continuation" not in ctx
+
+    persisted = json.loads((state_dir / "s5.json").read_text())
+    assert persisted["cls"] == "resolve"
+    assert persisted["out_tokens"] == 0
+    assert persisted["budget_soft"] == CLASSES["resolve"].budget_soft
+    assert persisted["transcript_offset"] == 777
 
 
 def test_user_naming_a_model_is_recorded_as_override(tmp_path):
@@ -1431,7 +1469,14 @@ def main(payload: dict) -> None:
             source=result.source,
             budget_soft=spec.budget_soft if spec else 0,
             transcript_offset=prior.transcript_offset if prior else 0,
-            out_tokens=prior.out_tokens if prior else 0,
+            # Budgets are per-task/per-class (the contract advertises
+            # "BUDGET soft N output tokens for class X"). A genuine new task
+            # must start its own count at zero; carrying the prior task's
+            # out_tokens forward would measure the new class's budget against
+            # lifetime session tokens, tripping the budget notice on the
+            # first tool call whenever a task switches to a smaller-budget
+            # class.
+            out_tokens=0,
         )
 
     state.user_override = any(
@@ -1452,7 +1497,7 @@ if __name__ == "__main__":
 - [ ] **Step 8: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_hookio.py tests/test_hook_prompt_submit.py -v`
-Expected: PASS, 13 passed (8 hookio + 5 hook)
+Expected: PASS, 14 passed (8 hookio + 6 hook)
 
 - [ ] **Step 9: Commit**
 
@@ -2531,6 +2576,7 @@ Measured: `claude -p --model claude-haiku-4-5-20251001` takes 5.8–7.0 s per ca
 
 ```python
 # tests/test_llm.py
+import importlib.util
 import json
 import subprocess
 import sys
@@ -2686,6 +2732,85 @@ def test_hook_exits_0_when_haiku_confirms_the_current_class(tmp_path):
     assert proc.stderr == "", f"hook wrote to stderr on agreement: {proc.stderr}"
 
 
+def _load_refine_hook_module():
+    """Load hooks/refine_class.py as an importable module (name != "__main__",
+    so the `hookio.run(main)` guard at the bottom does not fire) instead of
+    shelling out to it. This lets a test monkeypatch the module's `refine`
+    name directly, which is required to simulate a write landing *during*
+    the hook's ~6.5s refinement window deterministically (see below)."""
+    spec = importlib.util.spec_from_file_location("_refine_class_under_test", HOOK)
+    assert spec is not None and spec.loader is not None, f"cannot load spec for {HOOK}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_hook_preserves_a_concurrent_pre_tool_use_write_during_refinement(
+    tmp_path, monkeypatch
+):
+    # refine_class.py is asyncRewake: true - it runs concurrently with the
+    # live session for the ~6.5s refine() takes. A pre_tool_use.py hook
+    # firing in that window does its own load -> modify -> save of
+    # accounting fields (out_tokens, transcript_offset, overrides,
+    # budget_notified). Seeding those fields into the state file *before*
+    # the hook runs does not exercise the bug: with nothing else touching
+    # the file mid-run, "mutate the loaded state and save" and "reload then
+    # mutate and save" produce the same result. The write must land strictly
+    # between refine_class's initial load_state and its eventual save_state,
+    # so this monkeypatches `refine` (the slow step the real ~6.5s is spent
+    # in) to perform that write itself as a side effect before returning,
+    # then calls main() in-process. Fully deterministic - no real race,
+    # thread, or sleep involved.
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state_path = state_dir / "s1.json"
+    state_path.write_text(json.dumps({
+        "session_id": "s1", "cls": "unclassified", "confidence": 0.0,
+        "source": "none", "budget_soft": 0, "budget_notified": False,
+        "transcript_offset": 0, "out_tokens": 0, "user_override": False,
+        "overrides": [],
+    }))
+
+    overrides = [{"from": "opus", "to": "claude-sonnet-5",
+                  "precedence": "contract", "enforced": False}]
+    concurrent_write = {
+        "session_id": "s1", "cls": "unclassified", "confidence": 0.0,
+        "source": "none", "budget_soft": 0, "budget_notified": True,
+        "transcript_offset": 1234, "out_tokens": 5000, "user_override": False,
+        "overrides": overrides,
+    }
+
+    def fake_refine(prompt, names, settings):
+        # Stand-in for the real ~6.5s call: pre_tool_use.py's own
+        # load-modify-save lands here, strictly between refine_class's
+        # initial load_state (already done by the time main() calls this)
+        # and its eventual save_state (still to come).
+        state_path.write_text(json.dumps(concurrent_write))
+        return "pr_review"
+
+    monkeypatch.delenv("TASK_ROUTER_FAKE_HAIKU", raising=False)
+    monkeypatch.setenv("TASK_ROUTER_STATE_DIR", str(state_dir))
+
+    hook = _load_refine_hook_module()
+    monkeypatch.setattr(hook, "refine", fake_refine)
+
+    code = hook.main({"session_id": "s1", "prompt": "review the pull request"})
+    assert code == 2, "must exit 2 to rewake"
+
+    persisted = json.loads(state_path.read_text())
+    # The new classification must still land.
+    assert persisted["cls"] == "pr_review"
+    assert persisted["confidence"] == SETTINGS.refined_confidence
+    assert persisted["source"] == "haiku"
+    assert persisted["budget_soft"] == CLASSES["pr_review"].budget_soft
+    # The concurrent pre_tool_use write must survive, not be clobbered back
+    # to the pre-refinement snapshot (0 / 0 / [] / False).
+    assert persisted["out_tokens"] == 5000
+    assert persisted["transcript_offset"] == 1234
+    assert persisted["overrides"] == overrides
+    assert persisted["budget_notified"] is True
+
+
 def test_hook_exits_0_when_the_fake_class_is_not_in_the_taxonomy(tmp_path):
     state_dir = tmp_path / "state"
     state_dir.mkdir()
@@ -2823,11 +2948,20 @@ def main(payload: dict) -> int:
         return 0
 
     spec = classes[cls]
-    state.cls = cls
-    state.confidence = settings.refined_confidence
-    state.source = "haiku"
-    state.budget_soft = spec.budget_soft
-    save_state(state_dir, state)
+    # This hook is asyncRewake: true, so it runs concurrently with the live
+    # session for the ~6.5s refine() takes. A pre_tool_use.py hook firing in
+    # that window does its own load->modify->save of accounting fields
+    # (out_tokens, transcript_offset, overrides, budget_notified). Saving the
+    # stale `state` we loaded at the top would silently clobber that write
+    # (lost update). Re-loading immediately before saving shrinks the race
+    # window from ~6.5s to microseconds and applies only the classification
+    # fields on top of whatever is freshest on disk.
+    fresh = load_state(state_dir, payload["session_id"]) or state
+    fresh.cls = cls
+    fresh.confidence = settings.refined_confidence
+    fresh.source = "haiku"
+    fresh.budget_soft = spec.budget_soft
+    save_state(state_dir, fresh)
 
     contract = render(
         Classification(cls, settings.refined_confidence, "haiku"),
@@ -2858,7 +2992,7 @@ def haiku_fake_override() -> str | None:
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_llm.py -v`
-Expected: PASS, 12 passed
+Expected: PASS, 13 passed
 
 - [ ] **Step 7: Verify the real CLI path once, by hand**
 

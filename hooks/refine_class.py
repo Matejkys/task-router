@@ -42,11 +42,20 @@ def main(payload: dict) -> int:
         return 0
 
     spec = classes[cls]
-    state.cls = cls
-    state.confidence = settings.refined_confidence
-    state.source = "haiku"
-    state.budget_soft = spec.budget_soft
-    save_state(state_dir, state)
+    # This hook is asyncRewake: true, so it runs concurrently with the live
+    # session for the ~6.5s refine() takes. A pre_tool_use.py hook firing in
+    # that window does its own load->modify->save of accounting fields
+    # (out_tokens, transcript_offset, overrides, budget_notified). Saving the
+    # stale `state` we loaded at the top would silently clobber that write
+    # (lost update). Re-loading immediately before saving shrinks the race
+    # window from ~6.5s to microseconds and applies only the classification
+    # fields on top of whatever is freshest on disk.
+    fresh = load_state(state_dir, payload["session_id"]) or state
+    fresh.cls = cls
+    fresh.confidence = settings.refined_confidence
+    fresh.source = "haiku"
+    fresh.budget_soft = spec.budget_soft
+    save_state(state_dir, fresh)
 
     contract = render(
         Classification(cls, settings.refined_confidence, "haiku"),

@@ -3,8 +3,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from router.config import load_classes
+
 REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / "hooks/user_prompt_submit.py"
+CLASSES = load_classes(REPO / "config/classes.yaml", None)
 
 
 def run_hook(payload: dict, state_dir: Path, expect_stderr: bool = False) -> dict:
@@ -59,6 +62,41 @@ def test_followup_reuses_the_stored_class(tmp_path):
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "class=triage" in ctx
     assert "source=continuation" in ctx
+
+
+def test_new_task_starts_its_own_budget_at_zero_tokens(tmp_path):
+    # Budgets are per-task/per-class (the contract advertises "BUDGET soft N
+    # output tokens for class X"). A genuine new task (not a continuation)
+    # must not inherit the prior task's cumulative out_tokens - that would
+    # measure the new class's budget against lifetime session tokens and
+    # trip the budget notice on the very first tool call. The transcript
+    # offset, however, is not per-task: it must still carry forward so the
+    # transcript is not re-counted from the start.
+    state_dir = tmp_path
+    (state_dir / "s5.json").write_text(json.dumps({
+        "session_id": "s5", "cls": "recon", "confidence": 0.9,
+        "source": "rule:find", "budget_soft": CLASSES["recon"].budget_soft,
+        "budget_notified": False, "transcript_offset": 777,
+        "out_tokens": 200_000, "user_override": False, "overrides": [],
+    }))
+
+    # A URL and an issue reference both mark this as new work, so it cannot
+    # be mistaken for a continuation regardless of prior out_tokens/length.
+    out = run_hook(
+        {"session_id": "s5", "hook_event_name": "UserPromptSubmit",
+         "prompt": "Resolve issue https://example.com/o/r/issues/2099",
+         "transcript_path": str(tmp_path / "t.jsonl")},
+        state_dir,
+    )
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "class=resolve" in ctx
+    assert "source=continuation" not in ctx
+
+    persisted = json.loads((state_dir / "s5.json").read_text())
+    assert persisted["cls"] == "resolve"
+    assert persisted["out_tokens"] == 0
+    assert persisted["budget_soft"] == CLASSES["resolve"].budget_soft
+    assert persisted["transcript_offset"] == 777
 
 
 def test_user_naming_a_model_is_recorded_as_override(tmp_path):

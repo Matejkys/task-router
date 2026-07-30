@@ -45,7 +45,14 @@ def main(payload: dict) -> None:
             source=result.source,
             budget_soft=spec.budget_soft if spec else 0,
             transcript_offset=prior.transcript_offset if prior else 0,
-            out_tokens=prior.out_tokens if prior else 0,
+            # Budgets are per-task/per-class (the contract advertises
+            # "BUDGET soft N output tokens for class X"). A genuine new task
+            # must start its own count at zero; carrying the prior task's
+            # out_tokens forward would measure the new class's budget against
+            # lifetime session tokens, tripping the budget notice on the
+            # first tool call whenever a task switches to a smaller-budget
+            # class.
+            out_tokens=0,
         )
 
     state.user_override = any(
