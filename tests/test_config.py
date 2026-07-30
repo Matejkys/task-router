@@ -27,11 +27,11 @@ def test_missing_overlay_is_not_an_error():
 def test_overlay_merges_patterns_into_existing_class(tmp_path):
     overlay = tmp_path / "local.yaml"
     overlay.write_text(
-        "version: 1\nclasses:\n  triage:\n    patterns:\n      - 'datadoghq'\n"
+        "version: 1\nclasses:\n  triage:\n    patterns:\n      - 'example-overlay-pattern'\n"
     )
     classes = load_classes(REPO / "config/classes.yaml", overlay)
     joined = [p.pattern for p in classes["triage"].patterns]
-    assert "datadoghq" in joined
+    assert "example-overlay-pattern" in joined
     assert len(joined) > 1, "overlay must add to base patterns, not replace them"
 
 
