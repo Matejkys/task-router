@@ -2037,7 +2037,7 @@ git commit -m "feat: PreToolUse hook enforcing delegation, denying chips, watchi
 
 **Interfaces:**
 - Consumes: `SessionState` (Task 3), `Settings` (Task 1), `read_increment` (Task 7).
-- Produces: `append(path: Path, record: dict) -> None`; `read_all(path: Path) -> list[dict]`; a `Stop` hook writing one record per session.
+- Produces: `append(path: Path, record: dict) -> None`; `read_all(path: Path) -> list[dict]`; a `Stop` hook writing one record **per turn** (the `Stop` event fires once per assistant turn, not once per session). The append is deliberately unconditional and concurrency-safe; Task 10's reader collapses a session's per-turn rows into one sample.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2240,10 +2240,24 @@ git commit -m "feat: telemetry log and Stop hook pairing decisions with outcomes
 
 `propose` returns human-readable suggestions and never writes config — a router that retunes itself silently detunes itself.
 
+**One sample per session, not per turn.** The `Stop` hook fires once per
+assistant turn (verified against the hooks reference), so a single multi-turn
+session appends many telemetry rows under one `session_id`, its `out_tokens`
+growing each turn. If `summarise` counted each row as a sample, a chatty session
+— the corpus had one with 46 user turns — would masquerade as dozens of
+independent sessions and dominate a class's `n`, `median` and `p75`. That would
+corrupt exactly the calibration this report exists to produce, worst for classes
+already at n=3. So `summarise` first collapses rows to **one per `session_id`,
+keeping the row with the highest `out_tokens`** — the final, fullest snapshot of
+that session — and only then groups by class. Append-only per-turn writes are
+kept (they are concurrency-safe across the many parallel sessions this user
+runs); the deduplication happens here, at read time.
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_report.py
+from itertools import count
 from pathlib import Path
 
 from router.config import load_classes, load_settings
@@ -2253,9 +2267,16 @@ REPO = Path(__file__).resolve().parents[1]
 CLASSES = load_classes(REPO / "config/classes.yaml", None)
 SETTINGS = load_settings(REPO / "config/settings.yaml")
 
+_seq = count()
 
-def _row(cls: str, tokens: int, exceeded: bool = False, overrides=()) -> dict:
+
+def _row(
+    cls: str, tokens: int, exceeded: bool = False, overrides=(), session=None
+) -> dict:
+    # Default each row to its own session so tests that don't care about
+    # per-session dedup keep counting one sample per row.
     return {
+        "session_id": session or f"auto-{next(_seq)}",
         "class": cls, "budget_soft": 100_000, "overrides": list(overrides),
         "outcome": {"out_tokens": tokens, "exceeded": exceeded},
     }
@@ -2267,6 +2288,29 @@ def test_summarise_groups_by_class():
     assert s["triage"]["n"] == 2
     assert s["triage"]["median"] == 200
     assert s["pr_review"]["n"] == 1
+
+
+def test_summarise_collapses_a_sessions_turns_to_one_sample():
+    # One session appends a row per turn with growing out_tokens; it must count
+    # once, at its fullest snapshot, not once per turn.
+    rows = [
+        _row("triage", 50, session="sess-A"),
+        _row("triage", 180, session="sess-A"),
+        _row("triage", 240, session="sess-A"),
+    ]
+    s = summarise(rows)
+    assert s["triage"]["n"] == 1
+    assert s["triage"]["median"] == 240
+
+
+def test_dedup_keeps_the_fullest_snapshot_including_its_exceeded_flag():
+    rows = [
+        _row("triage", 50, exceeded=False, session="s1"),
+        _row("triage", 250_000, exceeded=True, session="s1"),
+    ]
+    s = summarise(rows)
+    assert s["triage"]["n"] == 1
+    assert s["triage"]["exceeded"] == 1
 
 
 def test_summarise_counts_exceeded_and_overrides():
@@ -2330,9 +2374,28 @@ from router import paths, telemetry
 from router.config import ClassSpec, Settings, load_classes, load_settings
 
 
+def _latest_per_session(rows: list[dict]) -> list[dict]:
+    """Collapse a session's many per-turn rows to its fullest one.
+
+    The Stop hook fires once per assistant turn, so one session appends many
+    rows under one session_id with growing out_tokens. Counting each as a sample
+    would let a chatty session dominate calibration, so keep only the row with
+    the highest out_tokens per session_id — the final, fullest snapshot. A row
+    without a session_id is treated as its own session.
+    """
+    latest: dict[str, dict] = {}
+    for i, row in enumerate(rows):
+        key = row.get("session_id") or f"__no_session_{i}"
+        tokens = row.get("outcome", {}).get("out_tokens", 0)
+        held = latest.get(key)
+        if held is None or tokens >= held.get("outcome", {}).get("out_tokens", 0):
+            latest[key] = row
+    return list(latest.values())
+
+
 def summarise(rows: list[dict]) -> dict[str, dict]:
     grouped: dict[str, list[dict]] = defaultdict(list)
-    for row in rows:
+    for row in _latest_per_session(rows):
         grouped[row.get("class", "unclassified")].append(row)
 
     out: dict[str, dict] = {}
@@ -2404,7 +2467,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_report.py -v`
-Expected: PASS, 6 passed
+Expected: PASS, 8 passed
 
 - [ ] **Step 5: Commit**
 

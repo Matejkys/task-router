@@ -271,12 +271,17 @@ reads only the increment. On crossing the soft budget it injects, once (flagged
 in state so it does not nag), `additionalContext`: "you are at 112K of 100K for
 class `triage` — stop and present state".
 
-**5. `Stop` — close telemetry.** Computes actual tokens, turns, wall clock and
-interrupts, and pairs them with the router's decision.
+**5. `Stop` — close telemetry.** Computes actual tokens and pairs them with the
+router's decision. `Stop` fires once per assistant turn, so this appends one row
+per turn under the session's id; `router report` collapses a session's rows into
+one sample at read time (keeping the fullest snapshot). The append stays
+unconditional because it is concurrency-safe across the many parallel sessions
+this user runs, where a read-modify-write upsert would not be.
 
 ## Telemetry and tuning
 
-One append-only JSONL, one line per session:
+One append-only JSONL, one row per turn, deduplicated to one sample per session
+when read:
 
 ```json
 {"class":"triage","confidence":0.82,"source":"rule","budget_soft":100000,
