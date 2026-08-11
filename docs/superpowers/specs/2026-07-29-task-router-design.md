@@ -96,15 +96,28 @@ Budgets below are measured medians and p75 from the corpus, not estimates.
 | `triage` | 4 | 240K | 3501K | two-phase, see below | `low` then `medium` | 100K for phase 1 |
 | `mechanical` | 7 | 300K | 964K | Sonnet, parallel pipeline when there are N items | `low` | 400K |
 | `resolve` | 9 | 263K | 458K | Sonnet implements, Opus acts as review gate | `medium` | 500K |
-| `feature` | 4 | 1378K | 1947K | Opus orchestrates and plans, Sonnet builds phase by phase | `high` | 2000K |
-| `investigate` | 4 | 888K | 2715K | Opus, with a mandatory checkpoint | `high` | 300K to checkpoint |
+| `feature` | 4 | 1378K | 1947K | main loop orchestrates and plans, the strong model builds phase by phase | `high` | 2000K |
+| `investigate` | 4 | 888K | 2715K | main loop reasons, subagents gather evidence on the strong model, with a mandatory checkpoint | `high` | 300K to checkpoint |
 | `discussion` | — | — | — | no delegation, no code | n/a | 50K |
 | `continuation` | — | — | — | inherits the running session's contract | inherited | inherited |
 
 The effort column applies to *subagents dispatched by* the class, since main-loop
-effort is not settable by a hook. For `investigate` it governs the subagents used
-for evidence gathering, not the Opus reasoning in the main loop. For
-`discussion` there are no subagents, so no effort is mandated.
+effort is not settable by a hook. For `discussion` there are no subagents, so no
+effort is mandated.
+
+**Addendum (2026-07-30): the sub-agent ceiling, decoupled from the main-loop
+model.** The original wording above ("Opus orchestrates … Sonnet builds")
+assumed the main loop itself runs on Opus, which matched the 90% baseline this
+design was built from. In practice the main-loop model is a per-session user
+choice — sessions that deliberately start on Sonnet still correctly dispatched
+Opus subagents for the two hardest tasks in a later 21-day sample (a
+~7-hour/2.7M-token session and a ~3.4-hour/1M-token one), but no class mandated
+anything above Sonnet for a subagent. Once `enforce: true`, that same ad hoc
+escalation would be silently rewritten back down to the class's mandate. So
+`feature` and `investigate` — the two classes whose measured budgets are an
+order of magnitude past the rest — now mandate `sub_model: claude-opus-5`
+regardless of what model the main loop is running. The other six classes are
+unchanged: their measured costs never showed a need past Sonnet.
 
 Two classes carry nearly all of the loss and need explaining.
 
