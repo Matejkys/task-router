@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,34 @@ def test_refine_returns_none_when_the_runner_fails():
         raise subprocess.TimeoutExpired(argv, timeout)
 
     assert refine("x", NAMES, SETTINGS, runner=runner) is None
+
+
+def test_default_runner_marks_its_subprocess_as_an_internal_call(monkeypatch):
+    # Without this marker, the spawned `claude -p` process re-fires our own
+    # hooks on this very classification prompt, logging the router talking to
+    # itself into real telemetry (confirmed in production: ~70% of a month of
+    # telemetry turned out to be exactly this).
+    from router.llm import _default_runner
+
+    captured = {}
+
+    class FakeResult:
+        stdout = "recon"
+
+    def fake_run(argv, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return FakeResult()
+
+    monkeypatch.setattr("router.llm.subprocess.run", fake_run)
+    out = _default_runner(["claude", "-p"], 10)
+
+    assert out == "recon"
+    env = captured["env"]
+    assert env is not None, "the real subprocess.run call must receive env="
+    assert env.get("TASK_ROUTER_INTERNAL_CALL") == "1"
+    assert env.get("PATH") == os.environ.get("PATH"), (
+        "must inherit the real environment, not replace it"
+    )
 
 
 def test_hook_exits_2_with_the_contract_on_stderr(tmp_path):

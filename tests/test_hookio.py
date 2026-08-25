@@ -69,3 +69,32 @@ def test_run_fails_open_on_malformed_stdin(monkeypatch, capsys):
         hookio.run(lambda payload: None)
     assert exc.value.code == 0
     assert capsys.readouterr().out == ""
+
+
+def test_run_short_circuits_on_internal_call(monkeypatch):
+    # router/llm.py's own `claude -p` subprocess sets this so its hooks don't
+    # re-log the router talking to itself. main must never run under it.
+    monkeypatch.setenv("TASK_ROUTER_INTERNAL_CALL", "1")
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"session_id": "s"}'))
+    calls = []
+    with pytest.raises(SystemExit) as exc:
+        hookio.run(lambda payload: calls.append(payload))
+    assert exc.value.code == 0
+    assert calls == [], "main must never run inside an internal call"
+
+
+def test_run_short_circuits_before_touching_stdin(monkeypatch, capsys):
+    # The check must happen before the stdin-reading try/except, not merely
+    # before calling main -- otherwise a stdin failure here would be silently
+    # swallowed as an ordinary hook crash instead of provably never reached.
+    monkeypatch.setenv("TASK_ROUTER_INTERNAL_CALL", "1")
+
+    class ExplodingStdin:
+        def read(self, *a, **kw):
+            raise AssertionError("stdin must not be read inside an internal call")
+
+    monkeypatch.setattr("sys.stdin", ExplodingStdin())
+    with pytest.raises(SystemExit) as exc:
+        hookio.run(lambda payload: None)
+    assert exc.value.code == 0
+    assert capsys.readouterr().err == "", "stdin was touched and its failure swallowed"

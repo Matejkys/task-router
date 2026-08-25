@@ -7,9 +7,11 @@ Never call this on a blocking path.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Sequence
 
+from router import paths
 from router.classify import UNCLASSIFIED
 from router.config import Settings
 
@@ -35,8 +37,13 @@ def parse_response(text: str, class_names: list[str]) -> str | None:
 
 
 def _default_runner(argv: Sequence[str], timeout: int) -> str:
+    # This spawns a normal `claude` invocation, which would otherwise re-fire
+    # our own hooks on this very classification prompt -- marking it lets
+    # hookio.run no-op instead of logging the router talking to itself.
+    env = {**os.environ, paths.INTERNAL_CALL_ENV: "1"}
     proc = subprocess.run(
-        list(argv), capture_output=True, text=True, timeout=timeout, check=True
+        list(argv), capture_output=True, text=True, timeout=timeout, check=True,
+        env=env,
     )
     return proc.stdout
 

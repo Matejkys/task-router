@@ -7,12 +7,15 @@ Output is gitignored: it contains real prompt text. Run agg_sessions.py first.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
-from router.classify import classify
-from router.config import load_classes, load_settings
-
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+from router.classify import classify  # noqa: E402
+from router.config import load_classes, load_settings  # noqa: E402
+
 SRC = REPO / "analysis/sessions.json"
 DST = REPO / "tests/fixtures/golden.local.jsonl"
 

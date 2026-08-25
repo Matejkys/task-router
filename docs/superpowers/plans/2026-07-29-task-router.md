@@ -1251,6 +1251,8 @@ import json
 import sys
 from collections.abc import Callable
 
+from router import paths
+
 
 def read_payload() -> dict:
     return json.load(sys.stdin)
@@ -1274,7 +1276,15 @@ def run(main: Callable[[dict], int | None]) -> None:
     Exits with whatever `main` returns (`refine_class` returns 2 to rewake the
     session), or 0. Any exception is reported on stderr and swallowed with
     exit 0. sys.exit is called outside the try so its SystemExit is not caught.
+
+    Short-circuits to a silent no-op inside the router's own internal
+    `claude -p` refinement call (see `paths.is_internal_call`), so that call
+    never re-enters the router on its own classification prompt. Found in
+    production after a month of shadow mode: ~70% of telemetry.jsonl turned
+    out to be exactly this, the router talking to itself.
     """
+    if paths.is_internal_call():
+        sys.exit(0)
     try:
         code = main(read_payload())
     except Exception as exc:  # noqa: BLE001 - failing open is mandatory
@@ -2925,9 +2935,11 @@ Never call this on a blocking path.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Sequence
 
+from router import paths
 from router.classify import UNCLASSIFIED
 from router.config import Settings
 
@@ -2953,8 +2965,13 @@ def parse_response(text: str, class_names: list[str]) -> str | None:
 
 
 def _default_runner(argv: Sequence[str], timeout: int) -> str:
+    # This spawns a normal `claude` invocation, which would otherwise re-fire
+    # our own hooks on this very classification prompt -- marking it lets
+    # hookio.run no-op instead of logging the router talking to itself.
+    env = {**os.environ, paths.INTERNAL_CALL_ENV: "1"}
     proc = subprocess.run(
-        list(argv), capture_output=True, text=True, timeout=timeout, check=True
+        list(argv), capture_output=True, text=True, timeout=timeout, check=True,
+        env=env,
     )
     return proc.stdout
 
@@ -3062,12 +3079,85 @@ HAIKU_FAKE_ENV = "TASK_ROUTER_FAKE_HAIKU"
 def haiku_fake_override() -> str | None:
     """Test-only: return a class name instead of spawning the Claude CLI."""
     return os.environ.get(HAIKU_FAKE_ENV) or None
+
+
+INTERNAL_CALL_ENV = "TASK_ROUTER_INTERNAL_CALL"
+
+
+def is_internal_call() -> bool:
+    """True inside the `claude -p` subprocess router/llm.py spawns for Haiku
+    refinement. That subprocess is a normal Claude Code invocation and would
+    otherwise re-trigger these same hooks on the router's own classification
+    prompt, polluting telemetry with the router talking to itself. Every hook
+    checks this via hookio.run and no-ops immediately when it is set."""
+    return os.environ.get(INTERNAL_CALL_ENV) == "1"
+```
+
+Found in production after a month of shadow mode, not during the original build: `_default_runner`'s `claude -p` subprocess call is itself a full Claude Code invocation, subject to the same globally-installed hooks -- so a low-confidence classification recursively re-fires `UserPromptSubmit`/`Stop` on the router's own meta-prompt ("Classify the following work request..."), logging a whole extra fake "session" to `telemetry.jsonl`. Measured impact: **70% of a month of real telemetry (138 of 197 deduplicated sessions) turned out to be exactly this** -- the router talking to itself, not real user work. Fixed by marking the subprocess's environment with `INTERNAL_CALL_ENV` and having `hookio.run` (Task 5) check it first, before touching stdin. Both `hookio.run` and `_default_runner`'s code blocks above already reflect the fix.
+
+Add to `tests/test_hookio.py` (Task 5):
+
+```python
+def test_run_short_circuits_on_internal_call(monkeypatch):
+    # router/llm.py's own `claude -p` subprocess sets this so its hooks don't
+    # re-log the router talking to itself. main must never run under it.
+    monkeypatch.setenv("TASK_ROUTER_INTERNAL_CALL", "1")
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"session_id": "s"}'))
+    calls = []
+    with pytest.raises(SystemExit) as exc:
+        hookio.run(lambda payload: calls.append(payload))
+    assert exc.value.code == 0
+    assert calls == [], "main must never run inside an internal call"
+
+
+def test_run_short_circuits_before_touching_stdin(monkeypatch, capsys):
+    # The check must happen before the stdin-reading try/except, not merely
+    # before calling main -- otherwise a stdin failure here would be silently
+    # swallowed as an ordinary hook crash instead of provably never reached.
+    monkeypatch.setenv("TASK_ROUTER_INTERNAL_CALL", "1")
+
+    class ExplodingStdin:
+        def read(self, *a, **kw):
+            raise AssertionError("stdin must not be read inside an internal call")
+
+    monkeypatch.setattr("sys.stdin", ExplodingStdin())
+    with pytest.raises(SystemExit) as exc:
+        hookio.run(lambda payload: None)
+    assert exc.value.code == 0
+    assert capsys.readouterr().err == "", "stdin was touched and its failure swallowed"
+```
+
+Add to `tests/test_llm.py`:
+
+```python
+def test_default_runner_marks_its_subprocess_as_an_internal_call(monkeypatch):
+    from router.llm import _default_runner
+
+    captured = {}
+
+    class FakeResult:
+        stdout = "recon"
+
+    def fake_run(argv, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return FakeResult()
+
+    monkeypatch.setattr("router.llm.subprocess.run", fake_run)
+    out = _default_runner(["claude", "-p"], 10)
+
+    assert out == "recon"
+    env = captured["env"]
+    assert env is not None, "the real subprocess.run call must receive env="
+    assert env.get("TASK_ROUTER_INTERNAL_CALL") == "1"
+    assert env.get("PATH") == os.environ.get("PATH"), (
+        "must inherit the real environment, not replace it"
+    )
 ```
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_llm.py -v`
-Expected: PASS, 13 passed
+Run: `uv run pytest tests/test_llm.py tests/test_hookio.py -v`
+Expected: PASS, 14 passed (test_llm.py) + 10 passed (test_hookio.py)
 
 - [ ] **Step 7: Verify the real CLI path once, by hand**
 

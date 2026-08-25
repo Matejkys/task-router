@@ -10,6 +10,8 @@ import json
 import sys
 from collections.abc import Callable
 
+from router import paths
+
 
 def read_payload() -> dict:
     return json.load(sys.stdin)
@@ -33,7 +35,13 @@ def run(main: Callable[[dict], int | None]) -> None:
     Exits with whatever `main` returns (`refine_class` returns 2 to rewake the
     session), or 0. Any exception is reported on stderr and swallowed with
     exit 0. sys.exit is called outside the try so its SystemExit is not caught.
+
+    Short-circuits to a silent no-op inside the router's own internal
+    `claude -p` refinement call (see `paths.is_internal_call`), so that call
+    never re-enters the router on its own classification prompt.
     """
+    if paths.is_internal_call():
+        sys.exit(0)
     try:
         code = main(read_payload())
     except Exception as exc:  # noqa: BLE001 - failing open is mandatory
