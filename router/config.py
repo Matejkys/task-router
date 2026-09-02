@@ -53,6 +53,9 @@ class Settings:
     min_samples_to_propose: int
     exceeded_ratio_threshold: float
     override_ratio_threshold: float
+    code_edit_tools: frozenset[str]
+    code_file_extensions: frozenset[str]
+    code_edit_deny_reason: str
 
 
 def _read_yaml(path: Path, required: bool) -> dict:
@@ -168,4 +171,9 @@ def load_settings(path: Path) -> Settings:
         override_ratio_threshold=float(
             _require(raw, "override_ratio_threshold", where)
         ),
+        code_edit_tools=frozenset(_require(raw, "code_edit_tools", where)),
+        code_file_extensions=frozenset(
+            ext.lower() for ext in _require(raw, "code_file_extensions", where)
+        ),
+        code_edit_deny_reason=_require(raw, "code_edit_deny_reason", where),
     )

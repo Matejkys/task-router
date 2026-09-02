@@ -35,6 +35,19 @@ def test_missing_state_is_none(tmp_path):
     assert load_state(tmp_path, "nope") is None
 
 
+def test_state_without_main_loop_code_edits_defaults_to_zero(tmp_path):
+    import json as _json
+    (tmp_path / "s1.json").write_text(_json.dumps({
+        "session_id": "s1", "cls": "triage", "confidence": 0.9,
+        "source": "rule:x", "budget_soft": 100_000, "budget_notified": False,
+        "transcript_offset": 0, "out_tokens": 0, "user_override": False,
+        "overrides": [],
+    }))
+    loaded = load_state(tmp_path, "s1")
+    assert loaded is not None
+    assert loaded.main_loop_code_edits == 0
+
+
 def test_corrupt_state_is_none_not_a_crash(tmp_path):
     (tmp_path / "s1.json").write_text("{not json")
     assert load_state(tmp_path, "s1") is None

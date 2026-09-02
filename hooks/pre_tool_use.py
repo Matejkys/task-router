@@ -38,6 +38,22 @@ def main(payload: dict) -> None:
         )
         return
 
+    if tool_name in settings.code_edit_tools and not payload.get("agent_id"):
+        tool_input = payload.get("tool_input") or {}
+        file_path = tool_input.get("file_path") or tool_input.get("notebook_path")
+        if file_path:
+            ext = Path(file_path).suffix.lower()
+            if ext in settings.code_file_extensions:
+                state.main_loop_code_edits += 1
+                save_state(state_dir, state)
+                if enforce:
+                    hookio.emit(
+                        "PreToolUse",
+                        permissionDecision="deny",
+                        permissionDecisionReason=settings.code_edit_deny_reason,
+                    )
+                    return
+
     notes: list[str] = []
     updated_input = None
 

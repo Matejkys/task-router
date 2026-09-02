@@ -37,6 +37,7 @@ def test_stop_hook_writes_the_paired_outcome(tmp_path):
         "transcript_offset": 0, "out_tokens": 250, "user_override": False,
         "overrides": [{"from": "opus", "to": "claude-sonnet-5",
                        "precedence": "contract", "enforced": False}],
+        "main_loop_code_edits": 3,
     }))
     telemetry = tmp_path / "telemetry.jsonl"
     transcript = tmp_path / "t.jsonl"
@@ -61,6 +62,7 @@ def test_stop_hook_writes_the_paired_outcome(tmp_path):
     assert row["outcome"]["out_tokens"] == 250
     assert row["outcome"]["exceeded"] is True
     assert row["overrides"][0]["to"] == "claude-sonnet-5"
+    assert row["outcome"]["main_loop_code_edits"] == 3
 
 
 def test_stop_hook_persists_updated_state_to_disk(tmp_path):

@@ -62,3 +62,48 @@ budget_notice_template: >-
 min_samples_to_propose: 5
 exceeded_ratio_threshold: 0.5
 override_ratio_threshold: 0.5
+
+# The main loop never edits code -- it plans, dispatches, and reviews. A
+# code-edit tool call from the main loop (no agent_id in the hook input) on a
+# code file is recorded always, and denied when enforcing. Docs and config
+# (.md, .yaml, .json, ...) are deliberately not listed: editing those is the
+# orchestrator's job.
+code_edit_tools:
+  - Edit
+  - Write
+  - NotebookEdit
+code_file_extensions:
+  - .py
+  - .pyi
+  - .ts
+  - .tsx
+  - .js
+  - .jsx
+  - .mjs
+  - .cjs
+  - .go
+  - .rs
+  - .java
+  - .kt
+  - .rb
+  - .php
+  - .sh
+  - .bash
+  - .zsh
+  - .sql
+  - .swift
+  - .c
+  - .h
+  - .cpp
+  - .hpp
+  - .cs
+  - .scala
+  - .vue
+  - .svelte
+  - .css
+  - .scss
+  - .html
+code_edit_deny_reason: >-
+  Router: code changes are delegated. Dispatch a subagent (Agent/Task) with
+  the model mandated in this task's DELEGATION line to make this edit, then
+  review its result. The main loop plans and reviews; it does not edit code.

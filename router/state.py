@@ -21,6 +21,7 @@ class SessionState:
     out_tokens: int = 0
     user_override: bool = False
     overrides: list[dict] = field(default_factory=list)
+    main_loop_code_edits: int = 0
 
 
 def _path(state_dir: Path, session_id: str) -> Path:

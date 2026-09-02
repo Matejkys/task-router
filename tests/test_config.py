@@ -74,6 +74,12 @@ def test_settings_carries_every_tunable():
     assert s.exceeded_ratio_threshold == 0.5
     assert s.override_ratio_threshold == 0.5
     assert any(p.search("see https://example.com") for p in s.new_work_patterns)
+    assert s.code_edit_tools == frozenset({"Edit", "Write", "NotebookEdit"})
+    assert ".py" in s.code_file_extensions
+    assert all(
+        ext.startswith(".") and ext == ext.lower() for ext in s.code_file_extensions
+    )
+    assert "delegated" in s.code_edit_deny_reason
 
 
 def test_missing_required_setting_fails_loudly(tmp_path):

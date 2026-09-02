@@ -44,6 +44,7 @@ def main(payload: dict) -> None:
                     state.budget_soft and state.out_tokens > state.budget_soft
                 ),
                 "budget_notified": state.budget_notified,
+                "main_loop_code_edits": state.main_loop_code_edits,
             },
         },
     )

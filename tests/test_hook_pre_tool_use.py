@@ -156,3 +156,98 @@ def test_budget_warning_fires_once(tmp_path):
 def test_unknown_session_is_a_no_op(tmp_path):
     out = run_hook(_agent_payload(tmp_path), tmp_path, enforce=True)
     assert out == {}
+
+
+def _edit_payload(file_path: str, **extra) -> dict:
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": file_path, "old_string": "a", "new_string": "b"},
+        "transcript_path": "/dev/null",
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_main_loop_edit_on_code_file_is_denied_when_enforcing(tmp_path):
+    seed_state(tmp_path)
+    payload = _edit_payload(str(tmp_path / "foo.py"))
+    payload["transcript_path"] = str(tmp_path / "t.jsonl")
+    out = run_hook(payload, tmp_path, enforce=True)
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "delegated" in hso["permissionDecisionReason"]
+    persisted = json.loads((tmp_path / "s1.json").read_text())
+    assert persisted["main_loop_code_edits"] == 1
+
+
+def test_main_loop_edit_on_code_file_is_recorded_but_allowed_in_shadow_mode(tmp_path):
+    seed_state(tmp_path)
+    payload = _edit_payload(str(tmp_path / "foo.py"))
+    payload["transcript_path"] = str(tmp_path / "t.jsonl")
+    out = run_hook(payload, tmp_path, enforce=False)
+    assert "permissionDecision" not in out.get("hookSpecificOutput", {})
+    persisted = json.loads((tmp_path / "s1.json").read_text())
+    assert persisted["main_loop_code_edits"] == 1
+
+
+def test_subagent_edit_on_code_file_is_never_denied(tmp_path):
+    seed_state(tmp_path)
+    payload = _edit_payload(str(tmp_path / "foo.py"), agent_id="abc123")
+    payload["transcript_path"] = str(tmp_path / "t.jsonl")
+    out = run_hook(payload, tmp_path, enforce=True)
+    assert out.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    persisted = json.loads((tmp_path / "s1.json").read_text())
+    assert persisted["main_loop_code_edits"] == 0
+
+
+def test_main_loop_write_to_docs_is_not_denied(tmp_path):
+    seed_state(tmp_path)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(tmp_path / "notes.md"), "content": "x"},
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    out = run_hook(payload, tmp_path, enforce=True)
+    assert out.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    persisted = json.loads((tmp_path / "s1.json").read_text())
+    assert persisted["main_loop_code_edits"] == 0
+
+
+def test_main_loop_write_uppercase_extension_is_denied(tmp_path):
+    seed_state(tmp_path)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(tmp_path / "src/App.TS"), "content": "x"},
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    out = run_hook(payload, tmp_path, enforce=True)
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+
+
+def test_main_loop_edit_with_null_agent_id_is_denied_when_enforcing(tmp_path):
+    seed_state(tmp_path)
+    payload = _edit_payload(str(tmp_path / "foo.py"), agent_id=None)
+    payload["transcript_path"] = str(tmp_path / "t.jsonl")
+    out = run_hook(payload, tmp_path, enforce=True)
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    persisted = json.loads((tmp_path / "s1.json").read_text())
+    assert persisted["main_loop_code_edits"] == 1
+
+
+def test_main_loop_edit_without_file_path_is_not_denied(tmp_path):
+    seed_state(tmp_path)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"old_string": "a", "new_string": "b"},
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    out = run_hook(payload, tmp_path, enforce=True)
+    assert out.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    persisted = json.loads((tmp_path / "s1.json").read_text())
+    assert persisted["main_loop_code_edits"] == 0
