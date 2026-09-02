@@ -3536,3 +3536,39 @@ on — hook stdout smoke tests demonstrably do not catch this class of defect.
 shows `model=` only, and the `ROUTER:` reason includes `/<effort>` only when
 effort is actually written. `sub_effort` stays in config; `decide()`'s effort
 path is unchanged for tools that declare the key.
+
+## Post-build addendum #5 (2026-09-02): token-consumption telemetry and cost comparison
+
+**Goal.** Test the hypothesis "planning with Fable in the main loop costs more up
+front but makes implementation cheaper (fewer fix cycles)". Two parts, in order.
+
+**Part 1 — retroactive cost analysis over transcripts (no hook changes).**
+- `config/pricing.yaml`: per canonical model `input`, `output`, `cache_read`,
+  `cache_write_5m`, `cache_write_1h` in USD per MTok, plus `as_of` and `source`.
+  Values from the Anthropic price list on 2026-09-02 (Fable 5.1 10/50, cache read
+  0.25; Fable 5 10/50, cache read 1.00; Opus 5 / 4.8 / 4.7 / 4.6 5/25; Sonnet 5
+  2/10; Sonnet 4.6 3/15; Haiku 4.5 1/5; cache read = 0.1x input unless listed,
+  cache write 1.25x / 2x input by TTL). `<synthetic>` is a zero-cost pseudo-model.
+  Unknown models are never silently priced: they are reported as unpriced tokens.
+- `router/usage.py`: offset-aware transcript reader (so Part 2 can read
+  incrementally), per-model totals of the usage meters (cache writes split by TTL
+  via `usage.cache_creation`, falling back to a configured default TTL),
+  subagent transcript discovery (`<transcript dir>/<session_id>/subagents/*.jsonl`),
+  and cost evaluation against the pricing table.
+- `analysis/cost_report.py`: one row per session with era = dominant main-loop
+  model, main-loop vs subagent cost, per-model breakdown, user turns, interrupts,
+  subagent dispatches, wall-clock span, and the router class when telemetry has
+  the session. Grouped output by era (n, median/p75 cost, main:sub share, cost per
+  user turn, interrupts and dispatches per session) and by model. Router-internal
+  `claude -p` classifier sessions are excluded and counted.
+- Tests on synthetic fixture transcripts; verified against real data for the last
+  90 days before any conclusion is drawn.
+
+**Part 2 — live telemetry (after Part 1).** `stop.py` records per-model usage for
+the main loop and for subagents (incremental offsets per file kept in session
+state), a `ts` timestamp on every row, and `router report` shows cost per class
+and main:sub share. Pricing and readers are shared with Part 1.
+
+**Caveat recorded up front.** The user is on a subscription, so dollars are a
+relative measure of consumption, not an invoice. Cache reads dominate token
+volume; conclusions must be drawn from priced cost, never from raw token counts.
