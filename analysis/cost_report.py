@@ -183,19 +183,22 @@ def build_session_row(
     internal_marker: str,
     interrupt_marker: str = "[Request interrupted",
     default_cache_ttl: str = "5m",
-) -> dict | None:
-    """Build one session's metrics row, or None if it should be excluded
-    (internal router classifier session)."""
+) -> tuple[dict | None, str]:
+    """Build one session's metrics row.
+
+    Returns (row, reason). reason is "ok" on success; on exclusion row is
+    None and reason is "internal" (the router's own `claude -p` classifier
+    session) or "empty" (no assistant records anywhere, main or subagent --
+    not worth a row, and not an "internal" exclusion either)."""
     records = parse_records(transcript)
     if not records:
-        return None
+        return None, "empty"
 
     first_text = first_user_text(records)
     if is_internal_session(first_text, internal_marker):
-        return None
+        return None, "internal"
 
     main_records = [r for r in records if not r.get("isSidechain")]
-    sidechain_records = [r for r in records if r.get("isSidechain")]
 
     main_usage, _ = read_usage(transcript, 0, default_cache_ttl=default_cache_ttl)
     main_only = [u for u in main_usage if not u.is_sidechain]
@@ -205,6 +208,9 @@ def build_session_row(
     for sub_path in subagent_transcripts(transcript):
         recs, _ = read_usage(sub_path, 0, default_cache_ttl=default_cache_ttl)
         sub_usage.extend(recs)
+
+    if not main_only and not sub_usage:
+        return None, "empty"
 
     main_totals = aggregate(main_only)
     sub_totals = aggregate(sub_usage)
@@ -229,7 +235,7 @@ def build_session_row(
             start_ts = t
             break
 
-    return {
+    row = {
         "session_id": session_id,
         "file": str(transcript),
         "era": era,
@@ -245,6 +251,7 @@ def build_session_row(
         "totals_by_model": {m: asdict(t) for m, t in combined_totals.items()},
         "unpriced": {m: asdict(t) for m, t in unpriced.items()},
     }
+    return row, "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +285,9 @@ def _p75(values: list[float]) -> float:
 
 
 def summarize_group(rows: list[dict]) -> dict:
+    """Per-group medians/p75 and cost shares. Shares and cost-per-turn are
+    `None` ("n/a") rather than 0%/100% when the group's total cost is zero --
+    a share computed over a zero denominator is not a real ratio."""
     n = len(rows)
     total_costs = [r["cost_total"] for r in rows]
     main_sum = sum(r["cost_main"] for r in rows)
@@ -291,9 +301,9 @@ def summarize_group(rows: list[dict]) -> dict:
         "n": n,
         "median_cost": _median(total_costs),
         "p75_cost": _p75(total_costs),
-        "main_share_pct": (100 * main_sum / denom) if denom else 0.0,
-        "sub_share_pct": (100 * sub_sum / denom) if denom else 0.0,
-        "median_cost_per_user_turn": _median(cost_per_turn),
+        "main_share_pct": (100 * main_sum / denom) if denom else None,
+        "sub_share_pct": (100 * sub_sum / denom) if denom else None,
+        "median_cost_per_user_turn": _median(cost_per_turn) if denom else None,
         "median_interrupts": _median([r["interrupts"] for r in rows]),
         "median_dispatches": _median([r["dispatches"] for r in rows]),
         "median_user_turns": _median(user_turns),
@@ -335,9 +345,10 @@ def _collect_rows(settings: Settings, pricing_models: dict, zero_cost_models: fr
         settings.analysis_projects_root, since_days=since_days, since_date=since_date
     )
     rows = []
-    excluded = 0
+    excluded_internal = 0
+    skipped_empty = 0
     for transcript in transcripts:
-        row = build_session_row(
+        row, reason = build_session_row(
             transcript,
             pricing=pricing_models,
             zero_cost_models=zero_cost_models,
@@ -346,15 +357,25 @@ def _collect_rows(settings: Settings, pricing_models: dict, zero_cost_models: fr
             internal_marker=settings.analysis_internal_session_marker,
         )
         if row is None:
-            excluded += 1
+            if reason == "internal":
+                excluded_internal += 1
+            else:
+                skipped_empty += 1
             continue
         rows.append(row)
-    return rows, excluded
+    return rows, excluded_internal, skipped_empty
 
 
-def _print_human(rows: list[dict], by: str, all_totals: dict[str, Totals], unpriced: dict[str, Totals], excluded: int):
+def _fmt_pct(value: float | None) -> str:
+    return "   n/a" if value is None else f"{value:5.1f}%"
+
+
+def _fmt_cost(value: float | None) -> str:
+    return "     n/a" if value is None else f"{value:9.3f}"
+
+
+def _print_group_table(rows: list[dict], by: str) -> None:
     groups = group_rows(rows, by)
-    print(f"Sessions analysed: {len(rows)} (excluded {excluded} internal router sessions)\n")
     header = (
         f"{'group':20} {'n':>4} {'median$':>10} {'p75$':>10} "
         f"{'main%':>7} {'sub%':>7} {'$/turn':>9} {'med_int':>8} {'med_disp':>9} {'med_turns':>10}"
@@ -365,20 +386,57 @@ def _print_human(rows: list[dict], by: str, all_totals: dict[str, Totals], unpri
         s = summarize_group(groups[key])
         print(
             f"{key:20} {s['n']:>4} {s['median_cost']:>10.2f} {s['p75_cost']:>10.2f} "
-            f"{s['main_share_pct']:>6.1f}% {s['sub_share_pct']:>6.1f}% "
-            f"{s['median_cost_per_user_turn']:>9.3f} {s['median_interrupts']:>8.1f} "
+            f"{_fmt_pct(s['main_share_pct'])} {_fmt_pct(s['sub_share_pct'])} "
+            f"{_fmt_cost(s['median_cost_per_user_turn'])} {s['median_interrupts']:>8.1f} "
             f"{s['median_dispatches']:>9.1f} {s['median_user_turns']:>10.1f}"
         )
 
-    print("\nTotals by model:")
-    thdr = f"{'model':30} {'input':>12} {'output':>12} {'cache_r':>12} {'cache_w5m':>12} {'cache_w1h':>12} {'calls':>7}"
-    print(thdr)
-    print("-" * len(thdr))
+
+def _print_model_cost_table(all_totals: dict[str, Totals], pricing_models: dict, zero_cost_models: frozenset) -> None:
+    breakdown = cost_usd(all_totals, pricing_models, zero_cost_models)
+    grand_total = breakdown.total
+    header = (
+        f"{'model':30} {'input':>12} {'output':>12} {'cache_r':>12} {'cache_w5m':>12} "
+        f"{'cache_w1h':>12} {'calls':>7} {'cost$':>10} {'share%':>8}"
+    )
+    print(header)
+    print("-" * len(header))
     for model, t in sorted(all_totals.items()):
+        cost = breakdown.per_model.get(model)
+        share = (100 * cost / grand_total) if cost is not None and grand_total else None
+        cost_str = f"{cost:10.2f}" if cost is not None else f"{'n/a':>10}"
+        share_str = f"{share:7.1f}%" if share is not None else f"{'n/a':>8}"
         print(
             f"{model:30} {t.input_tokens:>12,} {t.output_tokens:>12,} {t.cache_read:>12,} "
-            f"{t.cache_write_5m:>12,} {t.cache_write_1h:>12,} {t.calls:>7,}"
+            f"{t.cache_write_5m:>12,} {t.cache_write_1h:>12,} {t.calls:>7,} {cost_str} {share_str}"
         )
+
+
+def _print_human(
+    rows: list[dict],
+    by: str,
+    all_totals: dict[str, Totals],
+    unpriced: dict[str, Totals],
+    excluded_internal: int,
+    skipped_empty: int,
+    pricing_models: dict,
+    zero_cost_models: frozenset,
+):
+    print(
+        f"Sessions analysed: {len(rows)} "
+        f"(excluded {excluded_internal} internal router sessions, "
+        f"skipped empty transcripts: {skipped_empty})\n"
+    )
+
+    if by == "model":
+        # --by model shows only the per-model cost breakdown: a session-level
+        # grouping table would just repeat --by era's rows under a
+        # different label, since "model" and "era" are the same signal here.
+        _print_model_cost_table(all_totals, pricing_models, zero_cost_models)
+    else:
+        _print_group_table(rows, by)
+        print("\nTotals by model:")
+        _print_model_cost_table(all_totals, pricing_models, zero_cost_models)
 
     if unpriced:
         names = ", ".join(sorted(unpriced))
@@ -405,7 +463,7 @@ def main(argv: list[str] | None = None) -> None:
         since_date = datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         since_days = None
 
-    rows, excluded = _collect_rows(
+    rows, excluded_internal, skipped_empty = _collect_rows(
         settings, pricing_models, pricing.zero_cost_models, since_days, since_date
     )
     all_totals = totals_by_model_across(rows)
@@ -413,16 +471,22 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.json:
         groups = group_rows(rows, args.by)
+        model_costs = cost_usd(all_totals, pricing_models, pricing.zero_cost_models)
         out = {
             "sessions": rows,
-            "excluded_internal": excluded,
+            "excluded_internal": excluded_internal,
+            "skipped_empty": skipped_empty,
             "groups": {k: summarize_group(v) for k, v in groups.items()},
             "totals_by_model": {m: asdict(t) for m, t in all_totals.items()},
+            "cost_by_model": model_costs.per_model,
             "unpriced": {m: asdict(t) for m, t in unpriced.items()},
         }
         print(json.dumps(out, indent=1))
     else:
-        _print_human(rows, args.by, all_totals, unpriced, excluded)
+        _print_human(
+            rows, args.by, all_totals, unpriced, excluded_internal, skipped_empty,
+            pricing_models, pricing.zero_cost_models,
+        )
 
 
 if __name__ == "__main__":

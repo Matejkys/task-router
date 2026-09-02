@@ -168,7 +168,7 @@ def test_build_session_row_sums_main_and_sub_cost(tmp_path):
         "claude-sonnet-5": {"input": 2, "output": 10, "cache_read": 0.2, "cache_write_5m": 2.5, "cache_write_1h": 4},
         "claude-haiku-4-5-20251001": {"input": 1, "output": 5, "cache_read": 0.1, "cache_write_5m": 1.25, "cache_write_1h": 2},
     }
-    row = build_session_row(
+    row, reason = build_session_row(
         transcript,
         pricing=pricing,
         zero_cost_models=frozenset(),
@@ -176,6 +176,7 @@ def test_build_session_row_sums_main_and_sub_cost(tmp_path):
         telemetry_classes={},
         internal_marker="__no_match__",
     )
+    assert reason == "ok"
     assert row is not None
     assert row["cost_main"] > 0
     assert row["cost_sub"] > 0
@@ -195,7 +196,7 @@ def test_build_session_row_excludes_internal_sessions(tmp_path):
             _assistant("claude-haiku-4-5-20251001", "2026-09-01T10:00:01Z"),
         ],
     )
-    row = build_session_row(
+    row, reason = build_session_row(
         transcript,
         pricing={},
         zero_cost_models=frozenset(),
@@ -204,6 +205,42 @@ def test_build_session_row_excludes_internal_sessions(tmp_path):
         internal_marker=MARKER,
     )
     assert row is None
+    assert reason == "internal"
+
+
+def test_build_session_row_skips_empty_transcript_no_assistant_anywhere(tmp_path):
+    root = tmp_path / "projects" / "proj1"
+    transcript = root / "sess-empty.jsonl"
+    _write_jsonl(transcript, [_user("hello there", "2026-09-01T10:00:00Z")])
+    row, reason = build_session_row(
+        transcript,
+        pricing={},
+        zero_cost_models=frozenset(),
+        dispatch_tools=frozenset({"Agent", "Task"}),
+        telemetry_classes={},
+        internal_marker="__no_match__",
+    )
+    assert row is None
+    assert reason == "empty"
+
+
+def test_build_session_row_not_empty_when_only_subagent_has_assistant_records(tmp_path):
+    root = tmp_path / "projects" / "proj1"
+    transcript = root / "sess-sub-only.jsonl"
+    _write_jsonl(transcript, [_user("hello there", "2026-09-01T10:00:00Z")])
+    sub = root / "sess-sub-only" / "subagents" / "agent-1.jsonl"
+    _write_jsonl(sub, [_assistant("claude-haiku-4-5-20251001", "2026-09-01T10:00:05Z", out=5)])
+    row, reason = build_session_row(
+        transcript,
+        pricing={},
+        zero_cost_models=frozenset(),
+        dispatch_tools=frozenset({"Agent", "Task"}),
+        telemetry_classes={},
+        internal_marker="__no_match__",
+    )
+    assert reason == "ok"
+    assert row is not None
+    assert row["era"] is None
 
 
 def test_group_key_by_era_and_week_and_class():
@@ -229,3 +266,18 @@ def test_summarize_group_computes_medians_and_shares():
     assert s["median_user_turns"] == 3.0
     assert s["median_interrupts"] == 1.0
     assert s["median_dispatches"] == 2.0
+
+
+def test_summarize_group_shares_and_cost_per_turn_are_none_when_total_cost_zero():
+    rows = [
+        {"cost_main": 0.0, "cost_sub": 0.0, "cost_total": 0.0, "user_turns": 2,
+         "interrupts": 0, "dispatches": 1},
+        {"cost_main": 0.0, "cost_sub": 0.0, "cost_total": 0.0, "user_turns": 3,
+         "interrupts": 0, "dispatches": 0},
+    ]
+    s = summarize_group(rows)
+    assert s["main_share_pct"] is None
+    assert s["sub_share_pct"] is None
+    assert s["median_cost_per_user_turn"] is None
+    # unaffected metrics still compute normally
+    assert s["median_user_turns"] == 2.5
