@@ -365,7 +365,10 @@ taxonomy, so the difference is visible rather than only the absolute numbers.
 
 Shadow mode is not free: the contract costs roughly 250 tokens per prompt, and
 **if it classifies wrongly it causes sideways wandering by itself**. Hence teeth
-come second. Disabling is one value in the config.
+come second. Disabling is one value in the config. An installation can also enforce without
+changing the shipped default: `TASK_ROUTER_ENFORCE=1` in the environment of the
+`pre_tool_use.py` hook command overrides `enforce` — the author's install went
+live this way on 2026-09-02, keeping the public repository shadow-by-default.
 
 ## Testing
 

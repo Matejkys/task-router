@@ -46,6 +46,11 @@ denied. Do not expect shadow mode to improve anything — advisory guidance
 demonstrably does not change behaviour. It is there to calibrate the classifier
 and the budgets before they get teeth.
 
+To turn enforcement on for **one installation** without changing the shipped
+default, prefix the `pre_tool_use.py` hook command in `settings.json` with
+`TASK_ROUTER_ENFORCE=1` — the environment overrides `enforce` in
+`config/settings.yaml`. That is how the author's own install runs.
+
 ## Hooks
 
 Four entries in `~/.claude/settings.json`:
