@@ -281,3 +281,36 @@ def test_summarize_group_shares_and_cost_per_turn_are_none_when_total_cost_zero(
     assert s["median_cost_per_user_turn"] is None
     # unaffected metrics still compute normally
     assert s["median_user_turns"] == 2.5
+
+
+def test_cost_report_loads_pricing_through_the_shared_accessor(tmp_path, monkeypatch):
+    """The report and the Stop hook must price the same tokens from the same
+    table, so TASK_ROUTER_PRICING has to reach both."""
+    import analysis.cost_report as cr
+
+    alternate = tmp_path / "pricing.yaml"
+    alternate.write_text("models: {}\n")
+    monkeypatch.setenv("TASK_ROUTER_PRICING", str(alternate))
+
+    seen = []
+
+    class _Stop(Exception):
+        pass
+
+    def _spy(path):
+        seen.append(path)
+        raise _Stop  # nothing past pricing is under test here
+
+    monkeypatch.setattr(cr, "load_pricing", _spy)
+    try:
+        cr.main(["--json"])
+    except _Stop:
+        pass
+    assert seen == [alternate]
+
+
+def test_pricing_accessor_defaults_to_the_repo_table(monkeypatch):
+    from router import paths
+
+    monkeypatch.delenv("TASK_ROUTER_PRICING", raising=False)
+    assert paths.pricing_yaml() == paths.PRICING_YAML

@@ -130,6 +130,36 @@ Recomputes per-class medians and p75 from telemetry and *proposes* budget
 changes. It never writes config: a router that retunes itself silently detunes
 itself. Apply suggestions by hand to `config/classes.yaml`.
 
+Alongside the output-token columns it shows cost per class — `n$` (how many of
+the class's sessions carry usage; older rows do not), `med$` and `p75$` of
+`cost_usd.total`, and `main%`, the share of that cost spent in the main loop
+rather than in subagents. A class with no usage rows prints `n/a` rather than a
+misleading zero.
+
+## Cost
+
+```bash
+uv run python -m analysis.cost_report            # last 90 days, grouped by era
+uv run python -m analysis.cost_report --days 14
+uv run python -m analysis.cost_report --since 2026-08-01
+uv run python -m analysis.cost_report --by class --json
+```
+
+Reads the transcripts under `~/.claude/projects` retroactively: one row per
+session with its era (the dominant main-loop model), main-loop vs subagent
+cost, per-model breakdown, user turns, interrupts, subagent dispatches, span,
+and the router class where telemetry knows the session. `--by` groups by
+`era`, `model`, `class` or `week`; `--json` prints the whole thing for further
+analysis. The router's own `claude -p` classifier sessions are excluded and
+counted separately — they are the router talking to itself, not work.
+
+The Stop hook records the same numbers live, incrementally, so no transcript is
+re-parsed: each telemetry row carries a UTC `ts` and an `outcome.usage` block
+with per-model token totals for `main` (the main loop) and `sub` (sidechain
+records plus every subagent transcript), `cost_usd` split into
+`main`/`sub`/`total`, and `unpriced_models`. Cost accounting is fail-open: if
+pricing is unreadable the row is still written, just without `usage`.
+
 ## Configuration
 
 - `config/classes.yaml` — taxonomy, models, effort, budgets, generic patterns.
@@ -138,6 +168,17 @@ itself. Apply suggestions by hand to `config/classes.yaml`.
   base class's pattern list.
 - `config/settings.yaml` — thresholds, paths, `enforce`, and the code-edit
   invariant's tool list, code-extension list and deny reason.
+- `config/pricing.yaml` — USD per million tokens per canonical model id
+  (`input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`), plus
+  `as_of`, `source`, `default_cache_ttl` (used when a record reports only a flat
+  cache-creation total) and `zero_cost_models`. A model absent from the table is
+  never silently priced: its tokens are reported as `unpriced` instead, which is
+  the signal to add the new model. `TASK_ROUTER_PRICING` points both the hook
+  and the report at another table.
+
+  These are **list prices**, and the author is on a subscription — the dollars
+  are a consistent relative measure of consumption, not an invoice. Cache reads
+  dominate raw token volume, so compare priced cost, never token counts.
 
 ## Privacy
 

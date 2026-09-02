@@ -447,7 +447,10 @@ def _print_human(
 
 def main(argv: list[str] | None = None) -> None:
     settings = load_settings(paths.SETTINGS_YAML)
-    pricing = load_pricing(paths.REPO / "config/pricing.yaml")
+    # Same accessor the Stop hook uses, so TASK_ROUTER_PRICING points both
+    # at one table -- live telemetry and this retroactive report must never
+    # price the same tokens differently.
+    pricing = load_pricing(paths.pricing_yaml())
     pricing_models = {name: asdict(p) for name, p in pricing.models.items()}
 
     parser = argparse.ArgumentParser(description=__doc__)
