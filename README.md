@@ -12,7 +12,23 @@ difficulty. It classifies the kind of operation, which *is* readable, and
 mandates how the work should be delegated.
 
 The model of the main loop is deliberately out of scope: hooks cannot change it.
-The lever is delegation, which `PreToolUse` can enforce.
+The lever is delegation, which `PreToolUse` can enforce — in two ways once
+`enforce: true`:
+
+- **Every subagent dispatch gets the class's mandate.** The `model`/`effort` of
+  an `Agent`/`Task` call is rewritten to what the task class prescribes, and the
+  rewrite is announced to the orchestrator so it can slice work accordingly.
+- **The main loop never edits code.** Hooks fire inside subagents too, and the
+  hook input carries `agent_id` only there — so an `Edit`/`Write`/`NotebookEdit`
+  on a code-file extension with no `agent_id` is the orchestrator reaching for
+  the editor itself. It is denied, with a reason telling it to dispatch a
+  subagent with the mandated model and review the result. Docs and config
+  (`.md`, `.yaml`, `.json`, …) stay editable in either context: writing specs,
+  plans and configuration *is* the orchestrator's job.
+
+In shadow mode both are only counted (`overrides`, `main_loop_code_edits` in the
+telemetry row), so calibration also measures how often the orchestrator would
+have been corrected.
 
 ## Install
 
@@ -21,7 +37,7 @@ uv sync
 uv run pytest
 ```
 
-Then add the three hook entries below to `~/.claude/settings.json` (see
+Then add the four hook entries below to `~/.claude/settings.json` (see
 "Hooks").
 
 Ships in **shadow mode** (`config/settings.yaml`, `enforce: false`): the contract
@@ -32,11 +48,16 @@ and the budgets before they get teeth.
 
 ## Hooks
 
-Three entries in `~/.claude/settings.json`:
+Four entries in `~/.claude/settings.json`:
 
 - `UserPromptSubmit` -> `hooks/user_prompt_submit.py` (synchronous, <100 ms)
 - `UserPromptSubmit` -> `hooks/refine_class.py` (`asyncRewake: true`)
-- `PreToolUse` -> `hooks/pre_tool_use.py` (matcher `Agent|Task|mcp__ccd_session__spawn_task|Bash|Edit|Write|Read`)
+- `PreToolUse` -> `hooks/pre_tool_use.py` (matcher
+  `Agent|Task|mcp__ccd_session__spawn_task|Edit|Write|NotebookEdit` — the
+  dispatch tools for mandate enforcement, the code-edit tools for the
+  main-loop invariant. `Bash` and `Read` are deliberately left out: a Python
+  spawn on every one of them costs ~150 ms per call, so token accounting is
+  done per turn in `stop.py` instead of per tool call.)
 - `Stop` -> `hooks/stop.py`
 
 These keys go **inside** your existing top-level `"hooks"` object, merged with
@@ -70,7 +91,7 @@ cp ~/.claude/settings.json ~/.claude/settings.json.bak-$(date +%Y%m%d)
   ],
   "PreToolUse": [
     {
-      "matcher": "Agent|Task|mcp__ccd_session__spawn_task|Bash|Edit|Write|Read",
+      "matcher": "Agent|Task|mcp__ccd_session__spawn_task|Edit|Write|NotebookEdit",
       "hooks": [
         {
           "type": "command",
@@ -110,7 +131,8 @@ itself. Apply suggestions by hand to `config/classes.yaml`.
 - `config/classes.local.yaml` — gitignored overlay for internal vocabulary.
   Adds patterns to existing classes and may define new ones; never replaces a
   base class's pattern list.
-- `config/settings.yaml` — thresholds, paths, `enforce`.
+- `config/settings.yaml` — thresholds, paths, `enforce`, and the code-edit
+  invariant's tool list, code-extension list and deny reason.
 
 ## Privacy
 
