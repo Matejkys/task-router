@@ -45,7 +45,7 @@ def test_enforce_on_rewrites_the_model(tmp_path):
     seed_state(tmp_path)
     out = run_hook(_agent_payload(tmp_path), tmp_path, enforce=True)
     hso = out["hookSpecificOutput"]
-    assert hso["updatedInput"] == {"model": "claude-sonnet-5", "effort": "medium"}
+    assert hso["updatedInput"] == {"model": "sonnet", "effort": "medium"}
     assert "claude-sonnet-5" in hso["additionalContext"], "rewrite must be visible"
 
 
@@ -67,7 +67,7 @@ def test_user_override_is_recorded(tmp_path):
     assert "updatedInput" not in out.get("hookSpecificOutput", {})
     overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
     assert overrides == [{
-        "from": "opus", "to": "claude-sonnet-5",
+        "from": "claude-opus-5", "to": "claude-sonnet-5",
         "precedence": "user", "enforced": False,
     }]
 
@@ -89,9 +89,30 @@ def test_agent_override_is_recorded(tmp_path):
     assert "updatedInput" not in out.get("hookSpecificOutput", {})
     overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
     assert overrides == [{
-        "from": "opus", "to": "claude-sonnet-5",
+        "from": "claude-opus-5", "to": "claude-sonnet-5",
         "precedence": "agent", "enforced": False,
     }]
+
+
+def test_fill_emits_rewrite_but_no_override_and_no_notice(tmp_path):
+    # No model dispatched at all - the router filling in the default, not a
+    # conflict. updatedInput must still land (the mandate must land), but no
+    # override is recorded and no ROUTER: notice is injected.
+    seed_state(tmp_path)
+    payload = {
+        "session_id": "s1", "hook_event_name": "PreToolUse",
+        "tool_name": "Agent",
+        "tool_input": {"prompt": "review the diff"},
+        "transcript_path": str(tmp_path / "t.jsonl"),
+    }
+    out = run_hook(payload, tmp_path, enforce=True)
+    hso = out["hookSpecificOutput"]
+    assert hso["updatedInput"] == {"model": "sonnet", "effort": "medium"}
+    assert "additionalContext" not in hso or "ROUTER:" not in hso.get(
+        "additionalContext", ""
+    )
+    overrides = json.loads((tmp_path / "s1.json").read_text())["overrides"]
+    assert overrides == []
 
 
 def test_no_override_recorded_when_actor_matches_mandate(tmp_path):

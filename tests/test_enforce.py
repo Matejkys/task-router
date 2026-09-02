@@ -29,8 +29,9 @@ def _state(**kw) -> SessionState:
 def test_opus_call_is_rewritten_to_the_mandated_model():
     d = decide({"model": "opus", "prompt": "review it"}, SPEC, _state(), SETTINGS)
     assert d.precedence == "contract"
-    assert d.updated_input == {"model": "claude-sonnet-5", "effort": "medium"}
+    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
     assert "pr_review" in d.reason
+    assert d.divergence is True
 
 
 def test_call_already_compliant_is_left_alone():
@@ -39,6 +40,43 @@ def test_call_already_compliant_is_left_alone():
     )
     assert d.updated_input is None
     assert d.precedence == "none"
+
+
+def test_alias_compliant_call_is_left_alone():
+    d = decide({"model": "sonnet", "effort": "medium"}, SPEC, _state(), SETTINGS)
+    assert d.updated_input is None
+    assert d.precedence == "none"
+    assert d.divergence is False
+
+
+def test_alias_lookup_is_case_insensitive():
+    d = decide({"model": "Sonnet", "effort": "medium"}, SPEC, _state(), SETTINGS)
+    assert d.updated_input is None
+    assert d.precedence == "none"
+
+
+def test_no_model_dispatched_is_a_fill_not_a_divergence():
+    d = decide({}, SPEC, _state(), SETTINGS)
+    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+    assert d.divergence is False
+
+
+def test_wrong_model_is_a_divergence_recorded_canonically():
+    d = decide({"model": "opus"}, SPEC, _state(), SETTINGS)
+    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+    assert d.divergence is True
+
+
+def test_effort_divergence_alone_still_rewrites():
+    d = decide({"model": "sonnet", "effort": "high"}, SPEC, _state(), SETTINGS)
+    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+    assert d.divergence is True
+
+
+def test_unknown_model_string_passes_through_and_counts_as_divergence():
+    d = decide({"model": "gpt-9"}, SPEC, _state(), SETTINGS)
+    assert d.divergence is True
+    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
 
 
 def test_user_override_wins_over_the_contract():

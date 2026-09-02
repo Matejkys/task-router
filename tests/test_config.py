@@ -80,6 +80,13 @@ def test_settings_carries_every_tunable():
         ext.startswith(".") and ext == ext.lower() for ext in s.code_file_extensions
     )
     assert "delegated" in s.code_edit_deny_reason
+    assert s.model_aliases == {
+        "opus": "claude-opus-5",
+        "sonnet": "claude-sonnet-5",
+        "haiku": "claude-haiku-4-5-20251001",
+        "fable": "claude-fable-5-1",
+    }
+    assert all(alias == alias.lower() for alias in s.model_aliases)
 
 
 def test_missing_required_setting_fails_loudly(tmp_path):

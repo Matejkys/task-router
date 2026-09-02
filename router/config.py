@@ -56,6 +56,7 @@ class Settings:
     code_edit_tools: frozenset[str]
     code_file_extensions: frozenset[str]
     code_edit_deny_reason: str
+    model_aliases: dict[str, str]
 
 
 def _read_yaml(path: Path, required: bool) -> dict:
@@ -176,4 +177,12 @@ def load_settings(path: Path) -> Settings:
             ext.lower() for ext in _require(raw, "code_file_extensions", where)
         ),
         code_edit_deny_reason=_require(raw, "code_edit_deny_reason", where),
+        model_aliases=_load_model_aliases(raw, where),
     )
+
+
+def _load_model_aliases(raw: dict, where: str) -> dict[str, str]:
+    aliases = _require(raw, "model_aliases", where)
+    if not isinstance(aliases, dict) or not aliases:
+        raise ConfigError(f"model_aliases must be a non-empty mapping in {where}")
+    return {str(alias).strip().lower(): str(canonical) for alias, canonical in aliases.items()}

@@ -107,3 +107,12 @@ code_edit_deny_reason: >-
   Router: code changes are delegated. Dispatch a subagent (Agent/Task) with
   the model mandated in this task's DELEGATION line to make this edit, then
   review its result. The main loop plans and reviews; it does not edit code.
+
+# The Agent/Task tool takes model ALIASES (its enum: sonnet|opus|haiku|fable);
+# class mandates use canonical ids. Enforcement compares canonically and emits
+# the alias form the tool accepts.
+model_aliases:
+  opus: claude-opus-5
+  sonnet: claude-sonnet-5
+  haiku: claude-haiku-4-5-20251001
+  fable: claude-fable-5-1

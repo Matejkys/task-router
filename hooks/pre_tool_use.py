@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from router import hookio, paths
 from router.budget import read_increment
 from router.config import load_classes, load_settings
-from router.enforce import decide
+from router.enforce import canonical, decide
 from router.state import load_state, save_state
 
 
@@ -62,30 +62,36 @@ def main(payload: dict) -> None:
         tool_input = payload.get("tool_input") or {}
         spec = classes.get(state.cls)
         decision = decide(tool_input, spec, state, settings)
+        dispatched_canon = canonical(tool_input.get("model"), settings)
         if decision.updated_input is not None:
-            state.overrides.append({
-                "from": tool_input.get("model"),
-                "to": decision.updated_input["model"],
-                "precedence": decision.precedence,
-                "enforced": enforce,
-            })
+            if decision.divergence and spec is not None:
+                # A fill (agent named no model) is the router doing its
+                # default job, not an override - only a real divergence
+                # counts toward the override signal `router report` surfaces.
+                state.overrides.append({
+                    "from": dispatched_canon,
+                    "to": spec.sub_model,
+                    "precedence": decision.precedence,
+                    "enforced": enforce,
+                })
             if enforce:
                 updated_input = decision.updated_input
-                notes.append(
-                    settings.route_notice_template.format(reason=decision.reason)
-                )
+                if decision.divergence:
+                    notes.append(
+                        settings.route_notice_template.format(reason=decision.reason)
+                    )
         elif (
             decision.precedence in ("user", "agent")
             and spec is not None
             and spec.sub_model
-            and tool_input.get("model") != spec.sub_model
+            and dispatched_canon != spec.sub_model
         ):
             # A real mandate existed and diverged, but a higher-precedence
             # actor (user or agent) won, so the router deferred. Record it
             # anyway: this is the override-abuse signal `router report` is
             # built to surface, and it must fire regardless of enforce mode.
             state.overrides.append({
-                "from": tool_input.get("model"),
+                "from": dispatched_canon,
                 "to": spec.sub_model,
                 "precedence": decision.precedence,
                 "enforced": False,
