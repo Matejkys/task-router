@@ -271,7 +271,13 @@ failure or timeout it is also the final state.
 
 **2. `PreToolUse` on `Agent|Task` — enforcement.** Loads the active contract,
 looks up the mandated `model` and `effort` for the class and `subagent_type`,
-and returns `updatedInput` when they differ. This is the only place in the
+and returns `updatedInput` when they differ. In Claude Code 2.1.x `updatedInput`
+replaces the *entire* tool input rather than merging into it (learned from a
+production incident on 2026-09-02, not from the docs, which imply a merge), so
+the hook returns the full original input with only the overridden field
+changed and never adds a key the tool does not declare — the `Agent` tool has
+no `effort` parameter, so `effort` is compared and written only when the input
+already carries it. This is the only place in the
 design with hard enforcement, which is why it is deliberately dumb and fully
 table-driven.
 
