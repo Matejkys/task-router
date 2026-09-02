@@ -1,0 +1,76 @@
+# config/pricing.yaml
+# USD per million tokens, per canonical model id. Unknown models are never
+# silently priced -- their tokens accumulate as "unpriced" in cost_report.
+as_of: 2026-09-02
+source: "Anthropic price list (platform.claude.com/docs/en/pricing)"
+
+# Used when a usage record has no ephemeral_5m/1h cache-creation breakdown and
+# only a flat cache_creation_input_tokens total.
+default_cache_ttl: 5m
+
+# Models whose tokens are always free (e.g. the router's own synthetic/test
+# records), never counted as unpriced.
+zero_cost_models:
+  - "<synthetic>"
+
+models:
+  claude-fable-5-1:
+    input: 10
+    output: 50
+    cache_read: 0.25
+    cache_write_5m: 12.5
+    cache_write_1h: 20
+  claude-fable-5:
+    input: 10
+    output: 50
+    cache_read: 1.00
+    cache_write_5m: 12.5
+    cache_write_1h: 20
+  claude-opus-5:
+    input: 5
+    output: 25
+    cache_read: 0.5
+    cache_write_5m: 6.25
+    cache_write_1h: 10
+  claude-opus-4-8:
+    input: 5
+    output: 25
+    cache_read: 0.5
+    cache_write_5m: 6.25
+    cache_write_1h: 10
+  claude-opus-4-7:
+    input: 5
+    output: 25
+    cache_read: 0.5
+    cache_write_5m: 6.25
+    cache_write_1h: 10
+  claude-opus-4-6:
+    input: 5
+    output: 25
+    cache_read: 0.5
+    cache_write_5m: 6.25
+    cache_write_1h: 10
+  claude-sonnet-5:
+    input: 2
+    output: 10
+    cache_read: 0.2
+    cache_write_5m: 2.5
+    cache_write_1h: 4
+  claude-sonnet-4-6:
+    input: 3
+    output: 15
+    cache_read: 0.3
+    cache_write_5m: 3.75
+    cache_write_1h: 6
+  claude-haiku-4-5-20251001:
+    input: 1
+    output: 5
+    cache_read: 0.1
+    cache_write_5m: 1.25
+    cache_write_1h: 2
+  claude-haiku-4-5:
+    input: 1
+    output: 5
+    cache_read: 0.1
+    cache_write_5m: 1.25
+    cache_write_1h: 2

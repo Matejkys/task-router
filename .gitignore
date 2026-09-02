@@ -1,8 +1,8 @@
 # This repository is public. Nothing derived from real sessions may be committed.
 
 # Aggregated session data: prompt excerpts with internal URLs and customer
-# names. Reproducible from analysis/agg_sessions.py.
-analysis/sessions.json
+# names. Reproducible from analysis/agg_sessions.py and analysis/cost_report.py.
+analysis/*.json
 
 # Golden-set fixture built from the local corpus. A paraphrased
 # golden.example.jsonl is committed in its place.

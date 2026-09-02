@@ -116,3 +116,12 @@ model_aliases:
   sonnet: claude-sonnet-5
   haiku: claude-haiku-4-5-20251001
   fable: claude-fable-5-1
+
+# analysis/cost_report.py
+analysis:
+  default_days: 90
+  projects_root: ~/.claude/projects
+  telemetry_path: ~/.claude/task-router/telemetry.jsonl
+  # Distinctive marker in router/llm.py's classification prompt, used to
+  # exclude the router's own `claude -p` classifier sessions from the report.
+  internal_session_marker: "Classify the following work request by the KIND of operation it asks"

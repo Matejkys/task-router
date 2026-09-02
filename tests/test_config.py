@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from router.config import ConfigError, load_classes, load_settings
+from router.config import ConfigError, load_classes, load_pricing, load_settings
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -94,3 +94,28 @@ def test_missing_required_setting_fails_loudly(tmp_path):
     partial.write_text("version: 1\nenforce: false\n")
     with pytest.raises(ConfigError, match="confidence_threshold"):
         load_settings(partial)
+
+
+def test_settings_carries_analysis_section():
+    s = load_settings(REPO / "config/settings.yaml")
+    assert s.analysis_default_days == 90
+    assert "~" not in str(s.analysis_projects_root)
+    assert "~" not in str(s.analysis_telemetry_path)
+    assert "KIND of operation" in s.analysis_internal_session_marker
+
+
+def test_load_pricing_reads_known_model():
+    pricing = load_pricing(REPO / "config/pricing.yaml")
+    assert pricing.as_of == "2026-09-02"
+    assert "<synthetic>" in pricing.zero_cost_models
+    sonnet = pricing.models["claude-sonnet-5"]
+    assert sonnet.input == 2
+    assert sonnet.output == 10
+    assert sonnet.cache_read == 0.2
+    assert sonnet.cache_write_5m == 2.5
+    assert sonnet.cache_write_1h == 4
+
+
+def test_load_pricing_missing_file_fails_loudly(tmp_path):
+    with pytest.raises(ConfigError, match="not found"):
+        load_pricing(tmp_path / "absent.yaml")

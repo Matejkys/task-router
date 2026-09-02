@@ -57,6 +57,10 @@ class Settings:
     code_file_extensions: frozenset[str]
     code_edit_deny_reason: str
     model_aliases: dict[str, str]
+    analysis_default_days: int
+    analysis_projects_root: Path
+    analysis_telemetry_path: Path
+    analysis_internal_session_marker: str
 
 
 def _read_yaml(path: Path, required: bool) -> dict:
@@ -178,7 +182,25 @@ def load_settings(path: Path) -> Settings:
         ),
         code_edit_deny_reason=_require(raw, "code_edit_deny_reason", where),
         model_aliases=_load_model_aliases(raw, where),
+        **_load_analysis_settings(raw, where),
     )
+
+
+def _load_analysis_settings(raw: dict, where: str) -> dict:
+    analysis = _require(raw, "analysis", where)
+    where_a = f"'analysis' in {where}"
+    return {
+        "analysis_default_days": int(_require(analysis, "default_days", where_a)),
+        "analysis_projects_root": Path(
+            _require(analysis, "projects_root", where_a)
+        ).expanduser(),
+        "analysis_telemetry_path": Path(
+            _require(analysis, "telemetry_path", where_a)
+        ).expanduser(),
+        "analysis_internal_session_marker": _require(
+            analysis, "internal_session_marker", where_a
+        ),
+    }
 
 
 def _load_model_aliases(raw: dict, where: str) -> dict[str, str]:
@@ -186,3 +208,44 @@ def _load_model_aliases(raw: dict, where: str) -> dict[str, str]:
     if not isinstance(aliases, dict) or not aliases:
         raise ConfigError(f"model_aliases must be a non-empty mapping in {where}")
     return {str(alias).strip().lower(): str(canonical) for alias, canonical in aliases.items()}
+
+
+@dataclass(frozen=True)
+class ModelPrice:
+    input: float
+    output: float
+    cache_read: float
+    cache_write_5m: float
+    cache_write_1h: float
+
+
+@dataclass(frozen=True)
+class Pricing:
+    as_of: str
+    source: str
+    default_cache_ttl: str
+    zero_cost_models: frozenset[str]
+    models: dict[str, ModelPrice]
+
+
+def load_pricing(path: Path) -> Pricing:
+    """Load config/pricing.yaml. No prices are hardcoded in Python."""
+    raw = _read_yaml(path, required=True)
+    where = str(path)
+    models: dict[str, ModelPrice] = {}
+    for name, spec in (_require(raw, "models", where) or {}).items():
+        where_model = f"model '{name}' in {where}"
+        models[name] = ModelPrice(
+            input=float(_require(spec, "input", where_model)),
+            output=float(_require(spec, "output", where_model)),
+            cache_read=float(_require(spec, "cache_read", where_model)),
+            cache_write_5m=float(_require(spec, "cache_write_5m", where_model)),
+            cache_write_1h=float(_require(spec, "cache_write_1h", where_model)),
+        )
+    return Pricing(
+        as_of=str(_require(raw, "as_of", where)),
+        source=_require(raw, "source", where),
+        default_cache_ttl=_require(raw, "default_cache_ttl", where),
+        zero_cost_models=frozenset(_require(raw, "zero_cost_models", where)),
+        models=models,
+    )
