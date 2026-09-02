@@ -155,6 +155,11 @@ SCOPE+      related problem -> fix it without asking
             unrelated -> gh issue create, NOT a new-session chip
 ```
 
+The rendered subagents line names the mandated model only. Effort exists in
+config (`sub_effort`) but is enforced only when the dispatched tool input
+already carries an `effort` key — the `Agent` tool has none — so it is not
+advertised in the contract or the rewrite notice (2026-09-02).
+
 The last line is enforced rather than merely advised: `PreToolUse` denies
 `spawn_task` and returns the instruction to file a GitHub issue in
 `permissionDecisionReason`.

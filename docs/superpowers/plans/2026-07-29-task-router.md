@@ -1086,10 +1086,7 @@ def render(
     else:
         lines.append(f"DELEGATION  {spec.delegation}")
         if spec.sub_model:
-            lines.append(
-                f"            subagents: model={spec.sub_model} "
-                f"effort={spec.sub_effort}"
-            )
+            lines.append(f"            subagents: model={spec.sub_model}")
         lines.append(f"BUDGET      soft {spec.budget_soft} output tokens")
         lines.append(f"ESCALATION  {spec.escalation}")
 
@@ -3533,3 +3530,9 @@ forced a rewrite on every dispatch. Fix: `decide()` returns `{**tool_input,
 key; a model-compliant dispatch without an effort key is compliant and is not
 rewritten. Verified by a real `Agent` dispatch from a live session with enforce
 on — hook stdout smoke tests demonstrably do not catch this class of defect.
+
+**4. Effort is no longer advertised where it is not applied** (`f4c0c0f`). Because effort is enforced only when the dispatched input carries an
+`effort` key — and the `Agent` tool has none — the contract's subagents line now
+shows `model=` only, and the `ROUTER:` reason includes `/<effort>` only when
+effort is actually written. `sub_effort` stays in config; `decide()`'s effort
+path is unchanged for tools that declare the key.
