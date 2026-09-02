@@ -317,6 +317,32 @@ one, and they are deliberately not all off:
 | budget notice | `additionalContext` | **on** |
 | model/effort rewrite for subagents | `updatedInput` | off |
 | `spawn_task` denial | `permissionDecision: deny` | off |
+| main-loop code-edit denial (see addendum below) | `permissionDecision: deny` | off — but the attempt is **counted** |
+
+**Addendum (2026-09-02): the main loop never edits code.** The user's
+operating model sharpened after a month of shadow mode: the main loop is the
+orchestrator — it plans, dispatches subagents, reviews what they return and
+sends it back with findings — and **all code is written by subagents** chosen
+by use case (Haiku for log reading and extraction, Sonnet for routine
+implementation, Opus for hard implementation and investigation). The class
+mandates already encode the model choice; what was missing was any check that
+the main loop actually delegates instead of calling `Edit`/`Write` itself.
+
+That check is enforceable because hooks fire inside subagents too, and the hook
+input carries `agent_id` **only when the call comes from a subagent** (verified
+against the hooks reference). So `PreToolUse` on the code-edit tools
+(`Edit`, `Write`, `NotebookEdit`) denies the call when `agent_id` is absent and
+the target file has a code extension, with a reason telling the main loop to
+dispatch a subagent with the class's mandated model. Subagent edits pass. Edits
+to docs and config (`.md`, `.yaml`, `.json`, …) pass in either context — writing
+specs, plans and configuration *is* the orchestrator's job, and blocking it
+would contradict the model this exists to serve. The tool list, the extension
+list and the reason text are all configuration.
+
+In shadow mode the denial is off but every attempt increments
+`main_loop_code_edits` in state and lands in the telemetry row, so the
+calibration phase also measures how often the orchestrator reaches for the
+editor itself — the one behaviour the original design could only advise on.
 
 In shadow mode the session can therefore ignore the contract completely and
 effortlessly.
