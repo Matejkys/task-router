@@ -3483,3 +3483,40 @@ the end of the work. Before setting `enforce: true`:
 4. Only then flip `enforce: true`, and watch the override rate: a class
    overridden in more than half its sessions has a wrong mandate, not a
    disobedient agent.
+
+## Post-build changes landed before enforcement (2026-09-02)
+
+The task blocks above describe the original build. Two cross-cutting changes
+landed afterwards, driven by a month of shadow-mode telemetry and by the
+user's sharpened operating model (the main loop orchestrates and reviews; all
+code is written by subagents). Both were implemented by Sonnet subagents under
+that model, reviewed by the main loop, and sent back once before acceptance.
+
+**1. The main loop never edits code** (`8732319`). `hooks/pre_tool_use.py`
+gained a concern ahead of the dispatch branch: for a tool in
+`settings.code_edit_tools` with no `agent_id` in the payload (hooks fire inside
+subagents too and carry `agent_id` only there — verified against the hooks
+reference; the check is null-safe, `not payload.get("agent_id")`) and a target
+extension in `settings.code_file_extensions`, increment
+`SessionState.main_loop_code_edits` and save; when enforcing, emit
+`permissionDecision: deny` with `settings.code_edit_deny_reason` and return.
+`stop.py` writes the counter into the telemetry `outcome`. Docs and config
+extensions are deliberately absent from the list. The installed `PreToolUse`
+matcher is now `Agent|Task|mcp__ccd_session__spawn_task|Edit|Write|NotebookEdit`.
+
+**2. Canonical model comparison, alias-form rewrite** (`9be8155`). The
+Agent/Task tool's `model` enum is `sonnet|opus|haiku|fable`; mandates are
+canonical ids. `enforce.decide()` compared raw strings, so a dispatch of the
+right model read as a divergence — 53 of 101 recorded overrides in clean
+telemetry, with 48 more being "no model given". Now `canonical()` resolves
+`settings.model_aliases` before comparing; each field is `match` / `fill` /
+`divergence`; a fill is neither recorded nor announced; only a real divergence
+is recorded (canonical `from`/`to`) and gets the `ROUTER:` notice; the rewrite
+is emitted via `alias_for()` in the form the tool accepts. `Decision` gained
+`divergence: bool`. This is what made `router report`'s override signal mean
+something — and what removed the risk that `enforce: true` emitted an id the
+tool rejects on every mandated dispatch.
+
+Known minor, logged not fixed: `_field_status` would report a divergence for a
+class with `sub_model` set and `sub_effort: null`; no shipped class is
+configured that way.
