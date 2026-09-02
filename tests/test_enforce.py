@@ -27,9 +27,17 @@ def _state(**kw) -> SessionState:
 
 
 def test_opus_call_is_rewritten_to_the_mandated_model():
-    d = decide({"model": "opus", "prompt": "review it"}, SPEC, _state(), SETTINGS)
+    tool_input = {
+        "description": "Implement X", "prompt": "review it",
+        "subagent_type": "general-purpose", "model": "opus",
+    }
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
     assert d.precedence == "contract"
-    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+    assert d.updated_input == {
+        "description": "Implement X", "prompt": "review it",
+        "subagent_type": "general-purpose", "model": "sonnet",
+    }
+    assert d.updated_input is not None and "effort" not in d.updated_input
     assert "pr_review" in d.reason
     assert d.divergence is True
 
@@ -55,28 +63,70 @@ def test_alias_lookup_is_case_insensitive():
     assert d.precedence == "none"
 
 
+def test_model_compliant_with_no_effort_key_is_fully_compliant():
+    # Regression test: Agent has no `effort` parameter, so a dispatch that
+    # never carries the key must not be treated as a fill needing a rewrite.
+    tool_input = {
+        "description": "Implement X", "prompt": "review it",
+        "subagent_type": "general-purpose", "model": "sonnet",
+    }
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
+    assert d.updated_input is None
+    assert d.precedence == "none"
+    assert d.divergence is False
+
+
 def test_no_model_dispatched_is_a_fill_not_a_divergence():
-    d = decide({}, SPEC, _state(), SETTINGS)
-    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+    tool_input = {"description": "Implement X", "prompt": "review it"}
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
+    assert d.updated_input == {
+        "description": "Implement X", "prompt": "review it", "model": "sonnet",
+    }
+    assert d.updated_input is not None and "effort" not in d.updated_input
     assert d.divergence is False
 
 
 def test_wrong_model_is_a_divergence_recorded_canonically():
-    d = decide({"model": "opus"}, SPEC, _state(), SETTINGS)
-    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+    tool_input = {"description": "Implement X", "prompt": "review it", "model": "opus"}
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
+    assert d.updated_input == {
+        "description": "Implement X", "prompt": "review it", "model": "sonnet",
+    }
+    assert d.updated_input is not None and "effort" not in d.updated_input
     assert d.divergence is True
 
 
-def test_effort_divergence_alone_still_rewrites():
-    d = decide({"model": "sonnet", "effort": "high"}, SPEC, _state(), SETTINGS)
-    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+def test_effort_key_present_and_diverging_still_rewrites():
+    tool_input = {
+        "description": "Implement X", "prompt": "review it",
+        "model": "sonnet", "effort": "high",
+    }
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
+    assert d.updated_input == {
+        "description": "Implement X", "prompt": "review it",
+        "model": "sonnet", "effort": "medium",
+    }
     assert d.divergence is True
+
+
+def test_effort_key_present_and_matching_is_compliant():
+    tool_input = {
+        "description": "Implement X", "prompt": "review it",
+        "model": "sonnet", "effort": "medium",
+    }
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
+    assert d.updated_input is None
+    assert d.precedence == "none"
 
 
 def test_unknown_model_string_passes_through_and_counts_as_divergence():
-    d = decide({"model": "gpt-9"}, SPEC, _state(), SETTINGS)
+    tool_input = {"description": "Implement X", "prompt": "review it", "model": "gpt-9"}
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
     assert d.divergence is True
-    assert d.updated_input == {"model": "sonnet", "effort": "medium"}
+    assert d.updated_input == {
+        "description": "Implement X", "prompt": "review it", "model": "sonnet",
+    }
+    assert d.updated_input is not None and "effort" not in d.updated_input
 
 
 def test_user_override_wins_over_the_contract():

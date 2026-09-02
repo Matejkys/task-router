@@ -99,4 +99,5 @@ def test_enforcing_the_same_cycle_rewrites(tmp_path):
     }, env)
     hso = _stdout_json(pre)["hookSpecificOutput"]
     assert hso["updatedInput"]["model"] == "sonnet"
+    assert hso["updatedInput"]["prompt"] == "review it"
     assert "claude-sonnet-5" in hso["additionalContext"]

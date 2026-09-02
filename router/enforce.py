@@ -90,17 +90,28 @@ def decide(
         return Decision(None, "no delegation mandate for this class", "none")
 
     dispatched_model = tool_input.get("model")
-    dispatched_effort = tool_input.get("effort")
     model_canon = canonical(dispatched_model, settings)
-
     model_status = _field_status(dispatched_model, model_canon, spec.sub_model)
-    effort_status = _field_status(dispatched_effort, dispatched_effort, spec.sub_effort)
+
+    # `effort` is only part of the comparison when the tool's own input
+    # already declares the key - that is how we know the tool supports it.
+    # The Agent/Task tool has no `effort` parameter, so injecting the key
+    # would be a schema risk, and its absence must never count as a "fill"
+    # (that was the bug: every dispatch got rewritten, even a compliant one).
+    effort_in_input = "effort" in tool_input
+    dispatched_effort = tool_input.get("effort")
+    if effort_in_input:
+        effort_status = _field_status(
+            dispatched_effort, dispatched_effort, spec.sub_effort
+        )
+    else:
+        effort_status = "match"
 
     if model_status == "match" and effort_status == "match":
         return Decision(None, "already compliant", "none")
 
-    updated_input: dict = {"model": alias_for(spec.sub_model, settings)}
-    if spec.sub_effort is not None:
+    updated_input: dict = {**tool_input, "model": alias_for(spec.sub_model, settings)}
+    if effort_in_input and spec.sub_effort is not None:
         updated_input["effort"] = spec.sub_effort
 
     divergence = model_status == "divergence" or effort_status == "divergence"

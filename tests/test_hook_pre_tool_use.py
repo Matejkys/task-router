@@ -45,7 +45,7 @@ def test_enforce_on_rewrites_the_model(tmp_path):
     seed_state(tmp_path)
     out = run_hook(_agent_payload(tmp_path), tmp_path, enforce=True)
     hso = out["hookSpecificOutput"]
-    assert hso["updatedInput"] == {"model": "sonnet", "effort": "medium"}
+    assert hso["updatedInput"] == {"model": "sonnet", "prompt": "review the diff"}
     assert "claude-sonnet-5" in hso["additionalContext"], "rewrite must be visible"
 
 
@@ -107,7 +107,7 @@ def test_fill_emits_rewrite_but_no_override_and_no_notice(tmp_path):
     }
     out = run_hook(payload, tmp_path, enforce=True)
     hso = out["hookSpecificOutput"]
-    assert hso["updatedInput"] == {"model": "sonnet", "effort": "medium"}
+    assert hso["updatedInput"] == {"model": "sonnet", "prompt": "review the diff"}
     assert "additionalContext" not in hso or "ROUTER:" not in hso.get(
         "additionalContext", ""
     )
