@@ -3572,3 +3572,16 @@ and main:sub share. Pricing and readers are shared with Part 1.
 **Caveat recorded up front.** The user is on a subscription, so dollars are a
 relative measure of consumption, not an invoice. Cache reads dominate token
 volume; conclusions must be drawn from priced cost, never from raw token counts.
+
+**Delivered (2026-09-02).** Part 1 in `be825f1` + `37ea81a` (Sonnet), Part 2 in
+`ecd1c4e` + `7b55593` (Opus); 170 tests. Verified in the real harness: the first
+live Stop after the upgrade wrote a row with `ts` and `outcome.usage` for this
+session (main = fable, sub = sonnet/opus/haiku), and `router report` prices the
+class. Baseline from the 90-day retro run: median list-price cost per session
+by main-loop model — Opus 4.8 $132 (main share 87%), Opus 5 $70 (78%),
+Sonnet 5 $32 (53%); Fable n=1. 97% of priced cost is cache reads; interrupts
+are 0 at the median everywhere, so fix cycles must be proxied by dispatches per
+task and user turns. Two findings along the way: `load_state` used to reset a
+session on any unknown key (fixed), and sessions that existed before the upgrade
+start their `main_usage` at the saved transcript offset, so their first rows
+under-report main-loop cost relative to `cost_report` — expected, one-time.
