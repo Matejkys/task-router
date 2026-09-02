@@ -36,6 +36,13 @@ def test_discussion_class_mandates_no_subagent_model():
     assert "claude-sonnet-5" not in text
 
 
+def test_subagents_line_has_no_effort_fragment():
+    c = Classification("triage", 0.9, "rule:logs")
+    text = render(c, CLASSES["triage"], POLICY)
+    assert "model=" in text
+    assert "effort=" not in text
+
+
 def test_contract_is_compact():
     c = Classification("feature", 0.9, "rule:implement")
     text = render(c, CLASSES["feature"], POLICY)

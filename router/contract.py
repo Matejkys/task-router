@@ -23,10 +23,7 @@ def render(
     else:
         lines.append(f"DELEGATION  {spec.delegation}")
         if spec.sub_model:
-            lines.append(
-                f"            subagents: model={spec.sub_model} "
-                f"effort={spec.sub_effort}"
-            )
+            lines.append(f"            subagents: model={spec.sub_model}")
         lines.append(f"BUDGET      soft {spec.budget_soft} output tokens")
         lines.append(f"ESCALATION  {spec.escalation}")
 

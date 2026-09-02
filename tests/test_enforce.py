@@ -119,6 +119,25 @@ def test_effort_key_present_and_matching_is_compliant():
     assert d.precedence == "none"
 
 
+def test_reason_omits_effort_when_not_enforced():
+    tool_input = {
+        "description": "Implement X", "prompt": "review it",
+        "subagent_type": "general-purpose", "model": "opus",
+    }
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
+    assert "claude-sonnet-5" in d.reason
+    assert "/medium" not in d.reason
+
+
+def test_reason_includes_effort_when_actually_enforced():
+    tool_input = {
+        "description": "Implement X", "prompt": "review it",
+        "model": "sonnet", "effort": "high",
+    }
+    d = decide(tool_input, SPEC, _state(), SETTINGS)
+    assert "claude-sonnet-5/medium" in d.reason
+
+
 def test_unknown_model_string_passes_through_and_counts_as_divergence():
     tool_input = {"description": "Implement X", "prompt": "review it", "model": "gpt-9"}
     d = decide(tool_input, SPEC, _state(), SETTINGS)

@@ -116,8 +116,9 @@ def decide(
 
     divergence = model_status == "divergence" or effort_status == "divergence"
 
+    effort_enforced = effort_in_input and spec.sub_effort is not None
     mandate_desc = spec.sub_model
-    if spec.sub_effort is not None:
+    if effort_enforced:
         mandate_desc += f"/{spec.sub_effort}"
     reason_text = f"routed to {mandate_desc} per class {spec.name}"
     if divergence:
