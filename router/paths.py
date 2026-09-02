@@ -9,6 +9,16 @@ REPO = Path(__file__).resolve().parents[1]
 CLASSES_YAML = REPO / "config/classes.yaml"
 CLASSES_LOCAL_YAML = REPO / "config/classes.local.yaml"
 SETTINGS_YAML = REPO / "config/settings.yaml"
+PRICING_YAML = REPO / "config/pricing.yaml"
+
+PRICING_ENV = "TASK_ROUTER_PRICING"
+
+
+def pricing_yaml() -> Path:
+    """The pricing table, overridable for tests (including with a broken file,
+    to prove the Stop hook still writes its base telemetry row)."""
+    raw = os.environ.get(PRICING_ENV)
+    return Path(raw) if raw else PRICING_YAML
 
 STATE_DIR_ENV = "TASK_ROUTER_STATE_DIR"
 

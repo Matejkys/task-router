@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 
@@ -22,6 +22,14 @@ class SessionState:
     user_override: bool = False
     overrides: list[dict] = field(default_factory=list)
     main_loop_code_edits: int = 0
+    # Per-model token totals (usage.Totals as plain dicts, so state stays JSON).
+    # main_usage: non-sidechain records of the main transcript. sub_usage:
+    # sidechain records plus every subagent transcript. sub_offsets: byte
+    # offset already consumed per subagent transcript path -- the set of those
+    # files grows while the session runs, so each is tracked separately.
+    main_usage: dict[str, dict] = field(default_factory=dict)
+    sub_usage: dict[str, dict] = field(default_factory=dict)
+    sub_offsets: dict[str, int] = field(default_factory=dict)
 
 
 def _path(state_dir: Path, session_id: str) -> Path:
@@ -38,7 +46,14 @@ def _path(state_dir: Path, session_id: str) -> Path:
 def load_state(state_dir: Path, session_id: str) -> SessionState | None:
     try:
         path = _path(state_dir, session_id)
-        return SessionState(**json.loads(path.read_text()))
+        raw = json.loads(path.read_text())
+        if not isinstance(raw, dict):
+            return None
+        # Forward-compatible: a state file written by a newer router may carry
+        # keys this version does not know. Dropping them keeps the session's
+        # accounting alive; treating them as an error would silently reset it.
+        known = {f.name for f in fields(SessionState)}
+        return SessionState(**{k: v for k, v in raw.items() if k in known})
     except (OSError, ValueError, TypeError):
         # Missing, unreadable or corrupt state degrades to "no state"; a hook
         # that died here would block the user's work. This covers a session_id

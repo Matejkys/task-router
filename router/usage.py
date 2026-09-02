@@ -10,8 +10,14 @@ pass it in from router/config.py.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
+
+# Cache-creation TTL assumed when no pricing config is available to state one
+# (config/pricing.yaml carries the real value as `default_cache_ttl`). Only
+# reached on the fail-open path, where nothing is priced anyway.
+FALLBACK_CACHE_TTL = "5m"
 
 
 @dataclass(frozen=True)
@@ -42,7 +48,7 @@ def _cache_write_split(usage: dict, default_cache_ttl: str) -> tuple[int, int]:
 
 
 def read_usage(
-    path: Path, offset: int = 0, default_cache_ttl: str = "5m"
+    path: Path, offset: int = 0, default_cache_ttl: str = FALLBACK_CACHE_TTL
 ) -> tuple[list[UsageRecord], int]:
     """Read assistant usage records from `path` starting at byte `offset`.
 
@@ -130,6 +136,30 @@ def aggregate(records: list[UsageRecord]) -> dict[str, Totals]:
             calls=1,
         )
     return out
+
+
+def totals_from_dict(raw: dict) -> Totals:
+    """Rebuild Totals from a persisted dict, ignoring unknown keys so a state
+    file written by a newer router still loads."""
+    known = {f.name for f in dataclass_fields(Totals)}
+    return Totals(**{k: v for k, v in raw.items() if k in known})
+
+
+def totals_by_model_from_store(store: dict[str, dict]) -> dict[str, Totals]:
+    return {model: totals_from_dict(raw) for model, raw in store.items()}
+
+
+def merge_into(store: dict[str, dict], records: list[UsageRecord]) -> None:
+    """Accumulate `records` into a JSON-friendly per-model total store.
+
+    `store` maps model -> Totals-as-dict, which is how SessionState persists
+    usage. Mutated in place, so each side (main loop, subagents) keeps its own
+    running store across Stop invocations.
+    """
+    for model, totals in aggregate(records).items():
+        held = store.get(model)
+        current = totals_from_dict(held) if held is not None else Totals()
+        store[model] = asdict(current + totals)
 
 
 @dataclass

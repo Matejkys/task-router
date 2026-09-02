@@ -48,6 +48,48 @@ def test_state_without_main_loop_code_edits_defaults_to_zero(tmp_path):
     assert loaded.main_loop_code_edits == 0
 
 
+def test_state_without_usage_keys_defaults_to_empty(tmp_path):
+    import json as _json
+    (tmp_path / "s1.json").write_text(_json.dumps({
+        "session_id": "s1", "cls": "triage", "confidence": 0.9,
+        "source": "rule:x", "budget_soft": 100_000, "budget_notified": False,
+        "transcript_offset": 0, "out_tokens": 0, "user_override": False,
+        "overrides": [], "main_loop_code_edits": 0,
+    }))
+    loaded = load_state(tmp_path, "s1")
+    assert loaded is not None
+    assert loaded.main_usage == {}
+    assert loaded.sub_usage == {}
+    assert loaded.sub_offsets == {}
+
+
+def test_state_with_unknown_keys_still_loads(tmp_path):
+    # A state file written by a newer router must not reset the session.
+    import json as _json
+    (tmp_path / "s1.json").write_text(_json.dumps({
+        "session_id": "s1", "cls": "triage", "confidence": 0.9,
+        "source": "rule:x", "budget_soft": 100_000, "out_tokens": 42,
+        "from_the_future": {"nested": True},
+    }))
+    loaded = load_state(tmp_path, "s1")
+    assert loaded is not None
+    assert loaded.out_tokens == 42
+
+
+def test_usage_stores_roundtrip(tmp_path):
+    s = _state(
+        main_usage={"m": {"output_tokens": 5}},
+        sub_usage={"s": {"output_tokens": 9}},
+        sub_offsets={"/a/agent-1.jsonl": 128},
+    )
+    save_state(tmp_path, s)
+    loaded = load_state(tmp_path, "s1")
+    assert loaded is not None
+    assert loaded.main_usage == {"m": {"output_tokens": 5}}
+    assert loaded.sub_usage == {"s": {"output_tokens": 9}}
+    assert loaded.sub_offsets == {"/a/agent-1.jsonl": 128}
+
+
 def test_corrupt_state_is_none_not_a_crash(tmp_path):
     (tmp_path / "s1.json").write_text("{not json")
     assert load_state(tmp_path, "s1") is None
