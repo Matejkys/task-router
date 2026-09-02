@@ -3520,3 +3520,16 @@ tool rejects on every mandated dispatch.
 Known minor, logged not fixed: `_field_status` would report a divergence for a
 class with `sub_model` set and `sub_effort: null`; no shipped class is
 configured that way.
+
+**3. `updatedInput` replaces the whole tool input** (`f42ed70`, same day, after
+an incident). Enforcement went live and every `Agent` dispatch failed schema
+validation: Claude Code 2.1.x substitutes `updatedInput` for the entire
+`tool_input` (it does not merge, contrary to the docs-derived assumption the
+whole-branch review had accepted), and `decide()` returned only `{model,
+effort}`, so the required `description`/`prompt` vanished. Compounding it, the
+`Agent` tool has no `effort` parameter, so effort always read as a "fill" and
+forced a rewrite on every dispatch. Fix: `decide()` returns `{**tool_input,
+"model": alias}` and considers `effort` only when the input already carries the
+key; a model-compliant dispatch without an effort key is compliant and is not
+rewritten. Verified by a real `Agent` dispatch from a live session with enforce
+on — hook stdout smoke tests demonstrably do not catch this class of defect.
