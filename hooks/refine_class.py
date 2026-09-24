@@ -61,9 +61,18 @@ def main(payload: dict) -> int:
         Classification(cls, settings.refined_confidence, "haiku"),
         spec,
         load_scope_policy(paths.CLASSES_YAML),
+        brief=True,
     )
     # stderr, not stdout: exit 2 makes the harness deliver this as a reminder.
-    print(f"Router refined this task's classification:\n{contract}", file=sys.stderr)
+    # Worded as an update, not a second mandate: the session already has the
+    # full contract (SCOPE/ESCALATION included) from user_prompt_submit.py,
+    # so this only needs to correct the class/delegation it got wrong.
+    print(
+        f"Router refined this task's classification -- this supersedes the "
+        f"earlier contract for this task, the rest of it (scope, escalation) "
+        f"still applies:\n{contract}",
+        file=sys.stderr,
+    )
     return 2
 
 

@@ -30,6 +30,15 @@ class SessionState:
     main_usage: dict[str, dict] = field(default_factory=dict)
     sub_usage: dict[str, dict] = field(default_factory=dict)
     sub_offsets: dict[str, int] = field(default_factory=dict)
+    # The class the session last saw a FULL contract for (SCOPE/ESCALATION
+    # included), as opposed to a brief one. None means "no full contract
+    # rendered yet in this session" -- true for a brand new session, and also
+    # for a state file written before this field existed (see load_state's
+    # forward-compat filter below), which correctly forces one more full
+    # render rather than silently staying brief. refine_class.py deliberately
+    # never sets this: it always emits brief, so a class that arrives via
+    # refinement still gets a full contract on the session's next prompt.
+    contract_rendered_for: str | None = None
 
 
 def _path(state_dir: Path, session_id: str) -> Path:
