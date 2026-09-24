@@ -116,10 +116,7 @@ scope_policy: >-
   A newly discovered problem that is RELATED to this task: fix it without asking
   for confirmation. A problem that is UNRELATED: create a GitHub issue with
   `gh issue create` and move on. Do not open a background-task chip and do not
-  start a new session. Code is written by subagents in every class, including
-  unclassified - the main loop plans, dispatches and reviews; with no mandate,
-  pick Haiku for reading and extraction, Sonnet for routine implementation,
-  Opus for hard implementation or investigation. If a subagent genuinely needs
+  start a new session. If a subagent genuinely needs
   a stronger model than the mandate above, dispatch it with
   `model-override: <one-line reason>` in its prompt; a justified override is
   respected and recorded, a bare marker is not.

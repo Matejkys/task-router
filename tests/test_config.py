@@ -53,7 +53,7 @@ def test_invalid_effort_is_rejected(tmp_path):
 
 def test_settings_expands_user_paths():
     s = load_settings(REPO / "config/settings.yaml")
-    assert s.enforce is False
+    assert s.enforce is True
     assert s.confidence_threshold == 0.7
     assert "~" not in str(s.state_dir)
     assert s.haiku_model == "claude-haiku-4-5-20251001"

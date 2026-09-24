@@ -1,7 +1,10 @@
 version: 1
 
-# Shadow mode: contract injection and budget notices on, rewrites off.
-enforce: false
+# Enforcing: contract injection, budget notices, subagent dispatch rewrites
+# and the main-loop code-edit denial are all active. Set to false for shadow
+# mode (injection and notices only, nothing rewritten or denied) while
+# calibrating a fresh corpus - see README's "Before enforcing".
+enforce: true
 
 # Below this confidence the async Haiku refinement fires.
 confidence_threshold: 0.7
@@ -103,6 +106,19 @@ code_file_extensions:
   - .css
   - .scss
   - .html
+  - .tf
+  - .tfvars
+  - .gradle
+  - .kts
+  - .proto
+  - .lua
+  - .ex
+  - .exs
+  - .dart
+  - .pl
+  - .rake
+  - .clj
+  - .cljs
 code_edit_deny_reason: >-
   Router: code changes are delegated. Dispatch a subagent (Agent/Task) with
   the model mandated in this task's DELEGATION line to make this edit, then

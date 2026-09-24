@@ -26,9 +26,10 @@ The lever is delegation, which `PreToolUse` can enforce — in two ways once
   (`.md`, `.yaml`, `.json`, …) stay editable in either context: writing specs,
   plans and configuration *is* the orchestrator's job.
 
-In shadow mode both are only counted (`overrides`, `main_loop_code_edits` in the
-telemetry row), so calibration also measures how often the orchestrator would
-have been corrected.
+With `enforce: false` ("shadow mode") both are only counted (`overrides`,
+`main_loop_code_edits` in the telemetry row) instead of acted on, so
+calibration can measure how often the orchestrator would have been corrected
+before enforcement gets teeth.
 
 ## Install
 
@@ -40,16 +41,17 @@ uv run pytest
 Then add the four hook entries below to `~/.claude/settings.json` (see
 "Hooks").
 
-Ships in **shadow mode** (`config/settings.yaml`, `enforce: false`): the contract
-is injected and budgets are watched, but nothing is rewritten and no tool is
-denied. Do not expect shadow mode to improve anything — advisory guidance
-demonstrably does not change behaviour. It is there to calibrate the classifier
-and the budgets before they get teeth.
-
-To turn enforcement on for **one installation** without changing the shipped
-default, prefix the `pre_tool_use.py` hook command in `settings.json` with
-`TASK_ROUTER_ENFORCE=1` — the environment overrides `enforce` in
-`config/settings.yaml`. That is how the author's own install runs.
+Ships with **enforcement on** (`config/settings.yaml`, `enforce: true`):
+subagent dispatches are rewritten to the mandated model and the main loop is
+denied code-file edits. To run in shadow mode instead — contract injected and
+budgets watched, but nothing rewritten and no tool denied, useful while
+calibrating the classifier and budgets on a new corpus before trusting it with
+teeth — set `enforce: false` in `config/settings.yaml`, or for one
+installation without changing the shipped default, prefix the
+`pre_tool_use.py` hook command in `settings.json` with
+`TASK_ROUTER_ENFORCE=0` (the environment overrides `enforce` in
+`config/settings.yaml`). Do not expect shadow mode to improve anything on its
+own — advisory guidance demonstrably does not change behaviour.
 
 ## Hooks
 
@@ -190,8 +192,10 @@ runs on a fresh clone; the coverage test reports which fixture it used.
 
 ## Before enforcing
 
-Shadow mode is not the end state. Before setting `enforce: true` in
-`config/settings.yaml`:
+`config/settings.yaml` ships with `enforce: true`, calibrated against the
+author's own 41-session corpus. On a fork or a new install with a different
+mix of work, don't trust that calibration blindly — set `enforce: false`
+first and requalify it against your own sessions:
 
 1. Run `uv run python analysis/agg_sessions.py 14`, then
    `uv run python analysis/build_golden.py`, then **correct every label by
